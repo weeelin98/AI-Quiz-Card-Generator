@@ -1,0 +1,440 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Quiz Card Generator</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        .card {
+            transform-style: preserve-3d;
+            transition: transform 0.6s;
+        }
+        .card.is-flipped {
+            transform: rotateY(180deg);
+        }
+        .card-face {
+            backface-visibility: hidden;
+            -webkit-backface-visibility: hidden;
+        }
+        .card-face-back {
+            transform: rotateY(180deg);
+        }
+        .loader {
+            border-top-color: #3498db;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800 flex flex-col items-center justify-center min-h-screen p-4">
+
+    <div class="w-full max-w-2xl mx-auto bg-white rounded-xl shadow-lg p-6 md:p-8">
+        <div id="upload-section">
+            <h1 class="text-2xl md:text-3xl font-bold text-center text-gray-900 mb-2">AI Quiz Card Generator</h1>
+            <p class="text-center text-gray-500 mb-6">Upload a question image and let AI turn it into study cards for you.</p>
+            
+            <div class="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center cursor-pointer hover:border-blue-500 hover:bg-blue-50 transition-colors" id="drop-zone">
+                <input type="file" id="file-input" class="hidden" accept="image/*">
+                <svg class="mx-auto h-12 w-12 text-gray-400" stroke="currentColor" fill="none" viewBox="0 0 48 48" aria-hidden="true">
+                    <path d="M28 8H12a4 4 0 00-4 4v20m32-12v8m0 0v8a4 4 0 01-4 4H12a4 4 0 01-4-4v-4m32-4l-3.172-3.172a4 4 0 00-5.656 0L28 28M8 32l9.172-9.172a4 4 0 015.656 0L28 28m0 0l4 4m4-24h8m-4-4v8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+                </svg>
+                <p class="mt-4 text-sm text-gray-600">
+                    <span class="font-semibold text-blue-600">Click to upload</span> or drag and drop files here
+                </p>
+                <p class="text-xs text-gray-500 mt-1">Supports PNG, JPG, GIF, etc.</p>
+            </div>
+            <div id="file-name" class="text-center mt-4 text-sm text-gray-500"></div>
+        </div>
+
+        <div id="loading-section" class="hidden text-center py-12">
+            <div class="loader ease-linear rounded-full border-8 border-t-8 border-gray-200 h-24 w-24 mx-auto"></div>
+            <h2 class="text-xl font-semibold mt-6 text-gray-700">AI is working on the analysis…</h2>
+            <p class="text-gray-500 mt-2">This may take a moment—please wait.</p>
+        </div>
+
+        <div id="error-section" class="hidden text-center py-12">
+             <svg class="mx-auto h-12 w-12 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <h2 class="text-xl font-semibold mt-6 text-red-700">Oops, something went wrong.</h2>
+            <p id="error-message" class="text-gray-500 mt-2"></p>
+            <button id="try-again-button" class="mt-6 px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition">Try Again</button>
+        </div>
+
+        <div id="quiz-section" class="hidden">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-xl font-bold text-gray-900">Study Card</h2>
+                <div id="quiz-progress" class="text-sm font-medium text-gray-500"></div>
+            </div>
+
+            <div class="perspective-1000">
+                <div id="card" class="card relative w-full h-96">
+                    <!-- Card Front -->
+                    <div id="card-front" class="card-face absolute w-full h-full p-6 bg-white border border-gray-200 rounded-lg shadow-md flex flex-col">
+                        <div class="flex-grow overflow-auto">
+                            <p id="question-text" class="text-lg font-medium mb-4"></p>
+                            <div id="options-container" class="space-y-3"></div>
+                        </div>
+                    </div>
+                    <!-- Card Back -->
+                    <div id="card-back" class="card-face card-face-back absolute w-full h-full p-6 bg-gray-50 border border-gray-200 rounded-lg shadow-md flex flex-col">
+                        <div class="flex-grow overflow-auto">
+                           <h3 class="text-lg font-semibold text-green-700 mb-2">Correct Answer</h3>
+                           <p id="correct-answer" class="mb-4 p-3 bg-green-100 text-green-800 rounded-md"></p>
+                           <h3 class="text-lg font-semibold text-blue-700 mb-2">Explanation</h3>
+                           <p id="explanation-text" class="text-gray-700 whitespace-pre-wrap"></p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="mt-6 flex flex-col sm:flex-row gap-4 justify-center">
+                <button id="show-answer-button" class="w-full sm:w-auto flex-1 px-6 py-3 bg-blue-600 text-white font-semibold rounded-lg hover:bg-blue-700 transition-transform transform hover:scale-105 shadow-sm">Show Answer</button>
+                <button id="next-question-button" class="w-full sm:w-auto flex-1 px-6 py-3 bg-gray-700 text-white font-semibold rounded-lg hover:bg-gray-800 transition-transform transform hover:scale-105 shadow-sm hidden">Next</button>
+                <button id="add-to-favorites-button" class="w-full sm:w-auto px-4 py-3 bg-white border border-gray-300 text-gray-600 rounded-lg hover:bg-gray-100 hover:text-yellow-500 transition-colors shadow-sm" title="Collect to Favorites">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.196-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.783-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" />
+                    </svg>
+                </button>
+            </div>
+            <button id="restart-button" class="w-full mt-4 px-6 py-2 text-sm text-blue-600 hover:text-blue-800">Re-Upload</button>
+        </div>
+    </div>
+
+    <script>
+        // --- DOM Elements ---
+        const uploadSection = document.getElementById('upload-section');
+        const loadingSection = document.getElementById('loading-section');
+        const errorSection = document.getElementById('error-section');
+        const quizSection = document.getElementById('quiz-section');
+        
+        const dropZone = document.getElementById('drop-zone');
+        const fileInput = document.getElementById('file-input');
+        const fileNameDisplay = document.getElementById('file-name');
+        
+        const errorMessage = document.getElementById('error-message');
+        const tryAgainButton = document.getElementById('try-again-button');
+        
+        const card = document.getElementById('card');
+        const questionText = document.getElementById('question-text');
+        const optionsContainer = document.getElementById('options-container');
+        const correctAnswer = document.getElementById('correct-answer');
+        const explanationText = document.getElementById('explanation-text');
+        const quizProgress = document.getElementById('quiz-progress');
+
+        const showAnswerButton = document.getElementById('show-answer-button');
+        const nextQuestionButton = document.getElementById('next-question-button');
+        const addToFavoritesButton = document.getElementById('add-to-favorites-button');
+        const restartButton = document.getElementById('restart-button');
+
+        // --- App State ---
+        let quizData = [];
+        let currentQuestionIndex = 0;
+        let lastUploadedFile = null;
+
+        // --- Event Listeners ---
+        dropZone.addEventListener('click', () => fileInput.click());
+        dropZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            dropZone.classList.add('border-blue-500', 'bg-blue-50');
+        });
+        dropZone.addEventListener('dragleave', () => {
+            dropZone.classList.remove('border-blue-500', 'bg-blue-50');
+        });
+        dropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropZone.classList.remove('border-blue-500', 'bg-blue-50');
+            const files = e.dataTransfer.files;
+            if (files.length > 0) {
+                handleFile(files[0]);
+            }
+        });
+        fileInput.addEventListener('change', (e) => {
+            if (e.target.files.length > 0) {
+                handleFile(e.target.files[0]);
+            }
+        });
+
+        showAnswerButton.addEventListener('click', flipCard);
+        nextQuestionButton.addEventListener('click', showNextQuestion);
+        restartButton.addEventListener('click', resetApp);
+        tryAgainButton.addEventListener('click', () => {
+            if(lastUploadedFile) handleFile(lastUploadedFile);
+        });
+        addToFavoritesButton.addEventListener('click', () => {
+            // Placeholder for future functionality
+            alert('Favorites feature is under development!');
+        });
+
+        // --- Core Functions ---
+
+        /**
+         * Handles the selected file, reads it as Base64, and initiates analysis.
+         * @param {File} file The image file selected by the user.
+         */
+        function handleFile(file) {
+            if (!file.type.startsWith('image/')) {
+                showError('Please upload a valid image file (PNG, JPG, etc.).');
+                return;
+            }
+            lastUploadedFile = file;
+            fileNameDisplay.textContent = `Selected file: ${file.name}`;
+
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                const base64Data = e.target.result.split(',')[1];
+                analyzeImage(base64Data);
+            };
+            reader.onerror = () => {
+                showError('Failed to read the file. Please try again.');
+            };
+            reader.readAsDataURL(file);
+        }
+
+        /**
+         * Sends image data to the Gemini API for analysis.
+         * @param {string} base64ImageData The Base64 encoded image data.
+         */
+        async function analyzeImage(base64ImageData) {
+            showView('loading');
+            
+            const apiKey = ""; 
+            const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=${apiKey}`;
+
+            const prompt = `You are an expert exam-question analyst. Analyze all questions in the provided image. For each question, do the following:
+            1) Extract the full question text (including the stem).
+            2) Extract all answer choices in order.
+            3) Identify which choice is correct.
+            4) Provide a clear, detailed explanation of why that choice is correct.
+
+            Return the results as a JSON array. Each array element must be an object with these keys:
+            - "questionText": string (complete question text)
+            - "options": array of strings (e.g. ["A. ...", "B. ..."])
+            - "correctAnswer": string (the correct option's text)
+            - "explanation": string (detailed reasoning)
+
+            Ensure the output is valid, parseable JSON with one object per question.
+            `;
+
+            const payload = {
+                contents: [
+                    {
+                        role: "user",
+                        parts: [
+                            { text: prompt },
+                            { inlineData: { mimeType: "image/png", data: base64ImageData } }
+                        ]
+                    }
+                ],
+                generationConfig: {
+                    responseMimeType: "application/json",
+                    responseSchema: {
+                        type: "ARRAY",
+                        items: {
+                            type: "OBJECT",
+                            properties: {
+                                "questionText": { "type": "STRING" },
+                                "options": {
+                                    "type": "ARRAY",
+                                    "items": { "type": "STRING" }
+                                },
+                                "correctAnswer": { "type": "STRING" },
+                                "explanation": { "type": "STRING" }
+                            },
+                            required: ["questionText", "options", "correctAnswer", "explanation"]
+                        }
+                    }
+                }
+            };
+            
+            try {
+                const response = await fetchWithRetry(apiUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                if (!response.ok) {
+                    throw new Error(`API request failed, status code: ${response.status}`);
+                }
+
+                const result = await response.json();
+                
+                if (result.candidates && result.candidates[0].content && result.candidates[0].content.parts[0]) {
+                    const parsedJson = JSON.parse(result.candidates[0].content.parts[0].text);
+                    if (parsedJson && parsedJson.length > 0) {
+                        startQuiz(parsedJson);
+                    } else {
+                        showError("AI was unable to extract any questions from the image. Please ensure the image is clear and contains questions in a standard format.");
+                    }
+                } else {
+                     showError("AI returned data in an unexpected format. Please try again later.");
+                }
+
+            } catch (error) {
+                console.error('Error during AI analysis:', error);
+                showError(`Analysis failed: ${error.message}. Please check your network connection or try again later.`);
+            }
+        }
+        
+        /**
+         * Fetch with exponential backoff retry mechanism.
+         * @param {string} url The URL to fetch.
+         * @param {object} options The fetch options.
+         * @param {number} retries Number of retries.
+         * @param {number} delay Initial delay in ms.
+         */
+        async function fetchWithRetry(url, options, retries = 3, delay = 1000) {
+            for (let i = 0; i < retries; i++) {
+                try {
+                    const response = await fetch(url, options);
+                    if (response.status !== 429 && response.status < 500) { // Don't retry on client errors (except 429)
+                        return response;
+                    }
+                    // Wait before retrying
+                    await new Promise(resolve => setTimeout(resolve, delay * Math.pow(2, i)));
+                } catch (error) {
+                    if (i === retries - 1) throw error;
+                    await new Promise(resolve => setTimeout(resolve, delay * Math.pow(2, i)));
+                }
+            }
+        }
+
+
+        /**
+         * Initializes the quiz state with data from the API.
+         * @param {Array} questions An array of question objects.
+         */
+        function startQuiz(questions) {
+            quizData = questions;
+            currentQuestionIndex = 0;
+            renderCurrentQuestion();
+            showView('quiz');
+        }
+
+        /**
+         * Renders the current question onto the card.
+         */
+        function renderCurrentQuestion() {
+            if (currentQuestionIndex >= quizData.length) {
+                showEndScreen();
+                return;
+            }
+
+            const question = quizData[currentQuestionIndex];
+            
+            // Reset card state
+            card.classList.remove('is-flipped');
+            showAnswerButton.classList.remove('hidden');
+            nextQuestionButton.classList.add('hidden');
+
+            // Populate front of the card
+            questionText.textContent = `Q: ${question.questionText}`;
+            optionsContainer.innerHTML = '';
+            question.options.forEach(option => {
+                const optionElement = document.createElement('div');
+                optionElement.className = 'p-3 border border-gray-200 rounded-lg';
+                optionElement.textContent = option;
+                optionsContainer.appendChild(optionElement);
+            });
+
+            // Populate back of the card
+            correctAnswer.textContent = question.correctAnswer;
+            explanationText.textContent = question.explanation;
+
+            // Update progress
+            quizProgress.textContent = `Question ${currentQuestionIndex + 1} / ${quizData.length}`;
+        }
+        
+        /**
+         * Shows a screen when all questions are completed.
+         */
+        function showEndScreen() {
+            quizSection.innerHTML = `
+                <div class="text-center py-12">
+                    <h2 class="text-2xl font-bold text-green-600 mb-4">Congrats! You've finished all quizzes!</h2>
+                    <p class="text-gray-600 mb-8">By reviewing what you have learned and acquiring new knowledge, you can become a master.</p>
+                    <button id="end-restart-button" class="px-8 py-3 bg-blue-600 text-white font-semibold rounded-lg hover:bg-blue-700 transition">Do it again</button>
+                </div>
+            `;
+            document.getElementById('end-restart-button').addEventListener('click', resetApp);
+        }
+
+        /**
+         * Flips the card to show the answer.
+         */
+        function flipCard() {
+            card.classList.add('is-flipped');
+            showAnswerButton.classList.add('hidden');
+            nextQuestionButton.classList.remove('hidden');
+        }
+
+        /**
+         * Moves to the next question in the quiz.
+         */
+        function showNextQuestion() {
+            currentQuestionIndex++;
+            renderCurrentQuestion();
+        }
+
+        /**
+         * Resets the entire application to the initial upload state.
+         */
+        function resetApp() {
+            quizData = [];
+            currentQuestionIndex = 0;
+            lastUploadedFile = null;
+            fileInput.value = ''; // Clear file input
+            fileNameDisplay.textContent = '';
+            // Restore original quiz section if it was replaced by the end screen
+            if (!document.getElementById('card')) {
+                 location.reload(); // Simple way to restore state
+            }
+            showView('upload');
+        }
+        
+        /**
+         * Controls which main section is visible.
+         * @param {'upload' | 'loading' | 'error' | 'quiz'} viewName The view to display.
+         */
+        function showView(viewName) {
+            uploadSection.classList.add('hidden');
+            loadingSection.classList.add('hidden');
+            errorSection.classList.add('hidden');
+            quizSection.classList.add('hidden');
+
+            switch(viewName) {
+                case 'upload':
+                    uploadSection.classList.remove('hidden');
+                    break;
+                case 'loading':
+                    loadingSection.classList.remove('hidden');
+                    break;
+                case 'error':
+                    errorSection.classList.remove('hidden');
+                    break;
+                case 'quiz':
+                    quizSection.classList.remove('hidden');
+                    break;
+            }
+        }
+        
+        /**
+         * Displays an error message to the user.
+         * @param {string} message The error message to show.
+         */
+        function showError(message) {
+            errorMessage.textContent = message;
+            showView('error');
+        }
+
+    </script>
+</body>
+</html>
