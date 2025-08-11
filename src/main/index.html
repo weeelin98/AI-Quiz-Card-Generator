@@ -6,6 +6,8 @@
     <title>AI Quiz Card Generator</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- update with the latest version of pdf.js -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
     <style>
         body {
             font-family: 'Inter', sans-serif;
@@ -20,16 +22,34 @@
         .card-face {
             backface-visibility: hidden;
             -webkit-backface-visibility: hidden;
+            position: absolute;
+            width: 100%;
+            height: 100%;
         }
         .card-face-back {
             transform: rotateY(180deg);
         }
-        .loader {
-            border-top-color: #3498db;
-            animation: spin 1s linear infinite;
+        /* Ensure front and back are properly hidden when flipped */
+        .card.is-flipped .card-face:not(.card-face-back) {
+            opacity: 0;
+            pointer-events: none;
         }
-        @keyframes spin {
-            to { transform: rotate(360deg); }
+        .card:not(.is-flipped) .card-face-back {
+            opacity: 0;
+            pointer-events: none;
+        }
+        .progress-ring {
+            position: relative;
+        }
+        .progress-ring-svg {
+            transform: rotate(-90deg);
+        }
+        .progress-ring-circle {
+            transition: stroke-dashoffset 0.35s;
+            transform-origin: 50% 50%;
+        }
+        .no-pointer-events {
+            pointer-events: none;
         }
     </style>
 </head>
@@ -38,25 +58,57 @@
     <div class="w-full max-w-2xl mx-auto bg-white rounded-xl shadow-lg p-6 md:p-8">
         <div id="upload-section">
             <h1 class="text-2xl md:text-3xl font-bold text-center text-gray-900 mb-2">AI Quiz Card Generator</h1>
-            <p class="text-center text-gray-500 mb-6">Upload a question image and let AI turn it into study cards for you.</p>
+            <p class="text-center text-gray-500 mb-6">Upload an image or a PDF and let AI turn it into study cards for you.</p>
+            
+            <!-- add API test button -->
+            <div class="text-center mb-4">
+                <button id="test-api-button" class="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition text-sm">
+                    Test API Connection
+                </button>
+                <button id="test-pdf-content-button" class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition text-sm ml-2">
+                    Test PDF Content Recognition
+                </button>
+                <div id="api-status" class="text-xs text-gray-500 mt-2"></div>
+            </div>
             
             <div class="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center cursor-pointer hover:border-blue-500 hover:bg-blue-50 transition-colors" id="drop-zone">
-                <input type="file" id="file-input" class="hidden" accept="image/*">
+                <input type="file" id="file-input" class="hidden" accept="image/*,application/pdf" multiple>
                 <svg class="mx-auto h-12 w-12 text-gray-400" stroke="currentColor" fill="none" viewBox="0 0 48 48" aria-hidden="true">
                     <path d="M28 8H12a4 4 0 00-4 4v20m32-12v8m0 0v8a4 4 0 01-4 4H12a4 4 0 01-4-4v-4m32-4l-3.172-3.172a4 4 0 00-5.656 0L28 28M8 32l9.172-9.172a4 4 0 015.656 0L28 28m0 0l4 4m4-24h8m-4-4v8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
                 </svg>
                 <p class="mt-4 text-sm text-gray-600">
                     <span class="font-semibold text-blue-600">Click to upload</span> or drag and drop files here
                 </p>
-                <p class="text-xs text-gray-500 mt-1">Supports PNG, JPG, GIF, etc.</p>
+                <p class="text-xs text-gray-500 mt-1">Supports PDF, PNG, JPG, etc. You can select multiple images.</p>
             </div>
             <div id="file-name" class="text-center mt-4 text-sm text-gray-500"></div>
+            <div id="upload-controls" class="text-center mt-4 hidden">
+                <button id="start-analysis-button" class="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition">
+                    Start Analysis
+                </button>
+                <button id="clear-files-button" class="px-4 py-2 ml-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600 transition">
+                    Clear Files
+                </button>
+            </div>
+            <div class="text-center mt-2 text-xs text-gray-400">
+                💡 <strong>Tip:</strong> If PDF analysis fails, try uploading multiple screenshots of the questions instead!
+            </div>
         </div>
 
         <div id="loading-section" class="hidden text-center py-12">
-            <div class="loader ease-linear rounded-full border-8 border-t-8 border-gray-200 h-24 w-24 mx-auto"></div>
+            <div class="relative inline-block">
+                <div class="progress-ring h-24 w-24 mx-auto">
+                    <svg class="progress-ring-svg" width="96" height="96">
+                        <circle class="progress-ring-circle-bg" cx="48" cy="48" r="40" stroke-width="8" fill="transparent" stroke="#e5e7eb"/>
+                        <circle class="progress-ring-circle" cx="48" cy="48" r="40" stroke-width="8" fill="transparent" stroke="#3b82f6" stroke-linecap="round" stroke-dasharray="251.2" stroke-dashoffset="251.2"/>
+                    </svg>
+                    <div class="absolute inset-0 flex items-center justify-center">
+                        <div id="progress-text" class="text-lg font-semibold text-blue-600">0%</div>
+                    </div>
+                </div>
+            </div>
             <h2 class="text-xl font-semibold mt-6 text-gray-700">AI is working on the analysis…</h2>
-            <p class="text-gray-500 mt-2">This may take a moment—please wait.</p>
+            <p id="loading-message" class="text-gray-500 mt-2">This may take a moment—please wait.</p>
         </div>
 
         <div id="error-section" class="hidden text-center py-12">
@@ -75,10 +127,13 @@
             </div>
 
             <div class="perspective-1000">
-                <div id="card" class="card relative w-full h-96">
+                <div id="card" class="card relative w-full min-h-[24rem]">
                     <!-- Card Front -->
                     <div id="card-front" class="card-face absolute w-full h-full p-6 bg-white border border-gray-200 rounded-lg shadow-md flex flex-col">
                         <div class="flex-grow overflow-auto">
+                            <div id="question-image-container" class="mb-4 hidden">
+                                <img id="question-image" class="max-w-full h-auto rounded-lg border border-gray-300" alt="Question image">
+                            </div>
                             <p id="question-text" class="text-lg font-medium mb-4"></p>
                             <div id="options-container" class="space-y-3"></div>
                         </div>
@@ -105,336 +160,1683 @@
                 </button>
             </div>
             <button id="restart-button" class="w-full mt-4 px-6 py-2 text-sm text-blue-600 hover:text-blue-800">Re-Upload</button>
+            <button id="view-pdf-images-button" class="w-full mt-2 px-6 py-2 text-sm text-gray-600 hover:text-gray-800 hidden">View PDF Images</button>
         </div>
     </div>
 
     <script>
-        // --- DOM Elements ---
-        const uploadSection = document.getElementById('upload-section');
-        const loadingSection = document.getElementById('loading-section');
-        const errorSection = document.getElementById('error-section');
-        const quizSection = document.getElementById('quiz-section');
-        
-        const dropZone = document.getElementById('drop-zone');
-        const fileInput = document.getElementById('file-input');
-        const fileNameDisplay = document.getElementById('file-name');
-        
-        const errorMessage = document.getElementById('error-message');
-        const tryAgainButton = document.getElementById('try-again-button');
-        
-        const card = document.getElementById('card');
-        const questionText = document.getElementById('question-text');
-        const optionsContainer = document.getElementById('options-container');
-        const correctAnswer = document.getElementById('correct-answer');
-        const explanationText = document.getElementById('explanation-text');
-        const quizProgress = document.getElementById('quiz-progress');
-
-        const showAnswerButton = document.getElementById('show-answer-button');
-        const nextQuestionButton = document.getElementById('next-question-button');
-        const addToFavoritesButton = document.getElementById('add-to-favorites-button');
-        const restartButton = document.getElementById('restart-button');
-
-        // --- App State ---
-        let quizData = [];
-        let currentQuestionIndex = 0;
-        let lastUploadedFile = null;
-
-        // --- Event Listeners ---
-        dropZone.addEventListener('click', () => fileInput.click());
-        dropZone.addEventListener('dragover', (e) => {
-            e.preventDefault();
-            dropZone.classList.add('border-blue-500', 'bg-blue-50');
-        });
-        dropZone.addEventListener('dragleave', () => {
-            dropZone.classList.remove('border-blue-500', 'bg-blue-50');
-        });
-        dropZone.addEventListener('drop', (e) => {
-            e.preventDefault();
-            dropZone.classList.remove('border-blue-500', 'bg-blue-50');
-            const files = e.dataTransfer.files;
-            if (files.length > 0) {
-                handleFile(files[0]);
+        // wait for the page to fully load before initializing
+        window.addEventListener('DOMContentLoaded', () => {
+            // set the PDF.js worker path
+            if (typeof pdfjsLib !== 'undefined') {
+                pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
             }
-        });
-        fileInput.addEventListener('change', (e) => {
-            if (e.target.files.length > 0) {
-                handleFile(e.target.files[0]);
-            }
-        });
 
-        showAnswerButton.addEventListener('click', flipCard);
-        nextQuestionButton.addEventListener('click', showNextQuestion);
-        restartButton.addEventListener('click', resetApp);
-        tryAgainButton.addEventListener('click', () => {
-            if(lastUploadedFile) handleFile(lastUploadedFile);
-        });
-        addToFavoritesButton.addEventListener('click', () => {
-            // Placeholder for future functionality
-            alert('Favorites feature is under development!');
-        });
-
-        // --- Core Functions ---
-
-        /**
-         * Handles the selected file, reads it as Base64, and initiates analysis.
-         * @param {File} file The image file selected by the user.
-         */
-        function handleFile(file) {
-            if (!file.type.startsWith('image/')) {
-                showError('Please upload a valid image file (PNG, JPG, etc.).');
-                return;
-            }
-            lastUploadedFile = file;
-            fileNameDisplay.textContent = `Selected file: ${file.name}`;
-
-            const reader = new FileReader();
-            reader.onload = (e) => {
-                const base64Data = e.target.result.split(',')[1];
-                analyzeImage(base64Data);
-            };
-            reader.onerror = () => {
-                showError('Failed to read the file. Please try again.');
-            };
-            reader.readAsDataURL(file);
-        }
-
-        /**
-         * Sends image data to the Gemini API for analysis.
-         * @param {string} base64ImageData The Base64 encoded image data.
-         */
-        async function analyzeImage(base64ImageData) {
-            showView('loading');
+            // --- DOM Elements ---
+            const uploadSection = document.getElementById('upload-section');
+            const loadingSection = document.getElementById('loading-section');
+            const errorSection = document.getElementById('error-section');
+            const quizSection = document.getElementById('quiz-section');
             
-            const apiKey = ""; 
-            const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=${apiKey}`;
+            const dropZone = document.getElementById('drop-zone');
+            const fileInput = document.getElementById('file-input');
+            const fileNameDisplay = document.getElementById('file-name');
+            
+            // Accumulated user-selected images (append logic)
+            let accumulatedImageFiles = [];
+            
+            const errorMessage = document.getElementById('error-message');
+            const tryAgainButton = document.getElementById('try-again-button');
+            const loadingMessage = document.getElementById('loading-message');
+            const progressText = document.getElementById('progress-text');
+            
+            const card = document.getElementById('card');
+            const questionText = document.getElementById('question-text');
+            const optionsContainer = document.getElementById('options-container');
+            const correctAnswer = document.getElementById('correct-answer');
+            const explanationText = document.getElementById('explanation-text');
+            const quizProgress = document.getElementById('quiz-progress');
 
-            const prompt = `You are an expert exam-question analyst. Analyze all questions in the provided image. For each question, do the following:
-            1) Extract the full question text (including the stem).
-            2) Extract all answer choices in order.
-            3) Identify which choice is correct.
-            4) Provide a clear, detailed explanation of why that choice is correct.
+            const showAnswerButton = document.getElementById('show-answer-button');
+            const nextQuestionButton = document.getElementById('next-question-button');
+            const addToFavoritesButton = document.getElementById('add-to-favorites-button');
+            const restartButton = document.getElementById('restart-button');
+            const viewPdfImagesButton = document.getElementById('view-pdf-images-button');
+            const testApiButton = document.getElementById('test-api-button');
+            const testPdfContentButton = document.getElementById('test-pdf-content-button');
+            const startAnalysisButton = document.getElementById('start-analysis-button');
+            const clearFilesButton = document.getElementById('clear-files-button');
+            const uploadControls = document.getElementById('upload-controls');
+            const apiStatus = document.getElementById('api-status');
 
-            Return the results as a JSON array. Each array element must be an object with these keys:
-            - "questionText": string (complete question text)
-            - "options": array of strings (e.g. ["A. ...", "B. ..."])
-            - "correctAnswer": string (the correct option's text)
-            - "explanation": string (detailed reasoning)
+            // --- App State ---
+            let quizData = [];
+            let currentQuestionIndex = 0;
+            let lastUploadedFile = null;
+            
+            // HTML elements are working correctly - no test needed
 
-            Ensure the output is valid, parseable JSON with one object per question.
-            `;
+            // --- Event Listeners ---
+            dropZone.addEventListener('click', () => fileInput.click());
+            dropZone.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                dropZone.classList.add('border-blue-500', 'bg-blue-50');
+            });
+            dropZone.addEventListener('dragleave', () => {
+                dropZone.classList.remove('border-blue-500', 'bg-blue-50');
+            });
+            dropZone.addEventListener('drop', (e) => {
+                e.preventDefault();
+                dropZone.classList.remove('border-blue-500', 'bg-blue-50');
+                const files = e.dataTransfer.files;
+                if (files && files.length > 0) {
+                    processNewFiles(files);
+                }
+            });
+            fileInput.addEventListener('change', (e) => {
+                const files = e.target.files;
+                if (files && files.length > 0) {
+                    processNewFiles(files);
+                }
+            });
 
-            const payload = {
-                contents: [
-                    {
-                        role: "user",
-                        parts: [
-                            { text: prompt },
-                            { inlineData: { mimeType: "image/png", data: base64ImageData } }
-                        ]
-                    }
-                ],
-                generationConfig: {
-                    responseMimeType: "application/json",
-                    responseSchema: {
-                        type: "ARRAY",
-                        items: {
-                            type: "OBJECT",
-                            properties: {
-                                "questionText": { "type": "STRING" },
-                                "options": {
-                                    "type": "ARRAY",
-                                    "items": { "type": "STRING" }
-                                },
-                                "correctAnswer": { "type": "STRING" },
-                                "explanation": { "type": "STRING" }
-                            },
-                            required: ["questionText", "options", "correctAnswer", "explanation"]
-                        }
+            showAnswerButton.addEventListener('click', () => {
+                revealCorrectAnswer();
+                flipCard();
+            });
+            nextQuestionButton.addEventListener('click', showNextQuestion);
+            restartButton.addEventListener('click', resetApp);
+            tryAgainButton.addEventListener('click', () => {
+                if(lastUploadedFile) handleFile(lastUploadedFile);
+            });
+            addToFavoritesButton.addEventListener('click', () => {
+                alert('Favorites feature is under development!');
+            });
+            testApiButton.addEventListener('click', testApiConnection);
+            testPdfContentButton.addEventListener('click', testPdfContentRecognition);
+            viewPdfImagesButton.addEventListener('click', viewPdfImages);
+            startAnalysisButton.addEventListener('click', startAccumulatedImageAnalysis);
+            clearFilesButton.addEventListener('click', clearAccumulatedFiles);
+
+            // --- Core Functions ---
+            
+            /**
+             * Updates the circular progress bar
+             * @param {number} percent Progress percentage (0-100)
+             */
+            function updateProgress(percent) {
+                const circle = document.querySelector('.progress-ring-circle');
+                const text = document.getElementById('progress-text');
+                
+                if (circle && text) {
+                    const radius = 40;
+                    const circumference = 2 * Math.PI * radius;
+                    const offset = circumference - (percent / 100) * circumference;
+                    
+                    circle.style.strokeDashoffset = offset;
+                    text.textContent = Math.round(percent) + '%';
+                }
+            }
+            
+            /**
+             * Handles file selection, routing to the correct processor.
+             * @param {File} file The file selected by the user.
+             */
+            function handleFile(file) {
+                console.log('Processing file:', file.name, 'Type:', file.type);
+                
+                const validImageTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+                const validPdfType = 'application/pdf';
+
+                const fileExtension = file.name.split('.').pop().toLowerCase();
+                const isImageByMime = validImageTypes.includes(file.type);
+                const isPdfByMime = file.type === validPdfType;
+
+                const isImageByExt = ['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(fileExtension);
+                const isPdfByExt = fileExtension === 'pdf';
+
+                console.log('File validation:', {
+                    isImageByMime,
+                    isPdfByMime,
+                    isImageByExt,
+                    isPdfByExt,
+                    fileType: file.type,
+                    fileExtension
+                });
+
+                if (!isImageByMime && !isPdfByMime && !isImageByExt && !isPdfByExt) {
+                    showError('Please upload a valid image (PNG, JPG, GIF, WebP) or PDF file.');
+                    return;
+                }
+
+                lastUploadedFile = file;
+                fileNameDisplay.textContent = `Selected file: ${file.name}`;
+
+                if (isPdfByMime || isPdfByExt) {
+                    handlePdfFile(file);
+                } else {
+                    handleImageFile(file);
+                }
+            }
+
+            // Append-friendly image handler: add to accumulation and update UI, no auto-analyze
+            function handleImageFile(file) {
+                if (!file) return;
+                if (!(file.type && file.type.startsWith('image/'))) return;
+                
+                // If a PDF was previously queued accidentally, clear it for image workflow
+                if (uploadedFiles && uploadedFiles.length && uploadedFiles.some(f => (f.type === 'application/pdf' || f.name.toLowerCase().endsWith('.pdf')))) {
+                    uploadedFiles = [];
+                }
+                
+                accumulatedImageFiles.push(file);
+                uploadedFiles = accumulatedImageFiles.slice();
+                updateImageListUI();
+            }
+
+            async function handleMultipleFiles(files) {
+                console.log('Processing multiple files:', files.length);
+                
+                // Filter for image files only
+                const imageFiles = Array.from(files).filter(file => 
+                    file.type.startsWith('image/') || 
+                    ['png', 'jpg', 'jpeg', 'gif', 'webp'].includes(file.name.split('.').pop().toLowerCase())
+                );
+                
+                if (imageFiles.length === 0) {
+                    showError('No valid image files selected. Please select PNG, JPG, GIF, or WebP files.');
+                    return;
+                }
+                
+                if (imageFiles.length > 20) {
+                    showError('Too many files selected. Please select 20 or fewer images.');
+                    return;
+                }
+                
+                // Store files for later analysis
+                window.uploadedImageFiles = imageFiles;
+                window.uploadedImageParts = [];
+                
+                // Show upload controls
+                uploadControls.classList.remove('hidden');
+                
+                // Update file name display with detailed list
+                const fileList = imageFiles.map((file, index) => `${index + 1}. ${file.name}`).join('\n');
+                fileNameDisplay.innerHTML = `
+                    <div class="mb-2"><strong>Selected ${imageFiles.length} image file(s):</strong></div>
+                    <div class="text-left max-h-32 overflow-y-auto bg-gray-50 p-2 rounded text-xs">
+                        ${fileList}
+                    </div>
+                    <div class="mt-2 text-blue-600">Click "Start Analysis" when ready!</div>
+                `;
+                
+                // Process files in background without starting analysis
+                processImageFilesInBackground(imageFiles);
+            }
+
+            async function processImageFilesInBackground(files) {
+                const imageParts = [];
+                let processedCount = 0;
+                
+                for (const file of files) {
+                    try {
+                        const base64Data = await readFileAsBase64(file);
+                        imageParts.push({ 
+                            mimeType: file.type || 'image/jpeg', 
+                            data: base64Data,
+                            fileName: file.name
+                        });
+                        
+                        processedCount++;
+                        console.log(`Processed ${processedCount}/${files.length} images`);
+                        
+                    } catch (error) {
+                        console.error(`Error processing ${file.name}:`, error);
+                        // Continue with other files
                     }
                 }
-            };
-            
-            try {
-                const response = await fetchWithRetry(apiUrl, {
+                
+                if (imageParts.length > 0) {
+                    window.uploadedImageParts = imageParts;
+                    console.log(`Successfully processed ${imageParts.length} images, ready for analysis`);
+                    startAnalysisButton.disabled = false;
+                }
+            }
+
+            function startImageAnalysis() {
+                if (!window.uploadedImageParts || window.uploadedImageParts.length === 0) {
+                    alert('No images ready for analysis. Please wait for processing to complete.');
+                    return;
+                }
+                
+                showView('loading');
+                updateProgress(0);
+                loadingMessage.textContent = 'Starting AI analysis...';
+                analyzeContentInBatches(window.uploadedImageParts);
+            }
+
+            function clearUploadedFiles() {
+                window.uploadedImageFiles = null;
+                window.uploadedImageParts = null;
+                fileInput.value = '';
+                fileNameDisplay.textContent = '';
+                uploadControls.classList.add('hidden');
+            }
+
+            function readFileAsBase64(file) {
+                return new Promise((resolve, reject) => {
+                    const reader = new FileReader();
+                    reader.onload = (e) => resolve(e.target.result.split(',')[1]);
+                    reader.onerror = () => reject(new Error(`Failed to read ${file.name}`));
+                    reader.readAsDataURL(file);
+                });
+            }
+
+            async function handlePdfFile(file) {
+                console.log('Processing PDF file:', file.name);
+                console.log('PDF file size:', file.size, 'bytes');
+                
+                // check if PDF.js is available
+                if (typeof pdfjsLib === 'undefined') {
+                    showError('PDF processing library is not loaded. Please refresh the page and try again.');
+                    return;
+                }
+
+                // check file size
+                const maxFileSize = 50 * 1024 * 1024; // 50MB
+                if (file.size > maxFileSize) {
+                    showError(`PDF file is too large (${(file.size / 1024 / 1024).toFixed(1)} MB). Please use a file smaller than 50 MB.`);
+                    return;
+                }
+
+                showView('loading');
+                updateProgress(5);
+                loadingMessage.textContent = 'Reading PDF file...';
+
+                try {
+                    const arrayBuffer = await file.arrayBuffer();
+                    const typedarray = new Uint8Array(arrayBuffer);
+                    
+                    updateProgress(15);
+                    console.log('PDF loaded, getting document...');
+                    const pdf = await pdfjsLib.getDocument(typedarray).promise;
+                    console.log('PDF document loaded, pages:', pdf.numPages);
+                    
+                    // process all pages; batching to the API will be handled later
+                    const pagesToProcess = pdf.numPages;
+                    loadingMessage.textContent = `Converting ${pagesToProcess} PDF page(s) to images...`;
+                    
+                    const imageParts = [];
+
+                    for (let i = 1; i <= pagesToProcess; i++) {
+                        try {
+                            console.log(`Processing page ${i}/${pagesToProcess}`);
+                            const page = await pdf.getPage(i);
+                            
+                            // maximum resolution for best text recognition
+                            const viewport = page.getViewport({ scale: 3.0 }); // increase from 2.0 to 3.0 for maximum quality
+                            
+                            const canvas = document.createElement('canvas');
+                            const context = canvas.getContext('2d');
+                            canvas.height = viewport.height;
+                            canvas.width = viewport.width;
+
+                            // Enable high-quality rendering
+                            context.imageSmoothingEnabled = true;
+                            context.imageSmoothingQuality = 'high';
+
+                            const renderContext = {
+                                canvasContext: context,
+                                viewport: viewport,
+                                enableWebGL: true
+                            };
+
+                            await page.render(renderContext).promise;
+                            
+                            // use maximum quality for best text recognition
+                            const base64Data = canvas.toDataURL('image/jpeg', 1.0).split(',')[1]; // increase from 0.8 to 1.0
+                            imageParts.push({ 
+                                mimeType: 'image/jpeg', 
+                                data: base64Data,
+                                pageNumber: i,
+                                originalPageData: base64Data // Keep original for potential question images
+                            });
+                            
+                            // update the PDF page conversion progress
+                            const pageProgress = 15 + (i / pagesToProcess) * 10; // 15% to 25%
+                            updateProgress(pageProgress);
+                            
+                            console.log(`Page ${i} converted successfully, size: ${base64Data.length} bytes`);
+                        } catch (pageError) {
+                            console.error(`Error processing page ${i}:`, pageError);
+                            // continue processing other pages
+                        }
+                    }
+                    
+                    if (imageParts.length > 0) {
+                        const totalSize = imageParts.reduce((sum, part) => sum + part.data.length, 0);
+                        console.log(`Successfully converted ${imageParts.length} pages, total size: ${totalSize} bytes`);
+                        
+                        // Save images globally for debugging
+                        window.pdfImageParts = imageParts;
+                        
+                        // Show the view images button
+                        viewPdfImagesButton.classList.remove('hidden');
+                        
+                        // check if the total size is reasonable
+                        if (totalSize > 20 * 1024 * 1024) { // 20MB
+                            console.warn('Total image size is very large, this may cause API issues');
+                            loadingMessage.textContent = 'Warning: Large file detected, processing may take longer...';
+                        }
+                        
+                        analyzeContentInBatches(imageParts);
+                    } else {
+                        showError('Could not extract any pages from the PDF. Please ensure the PDF is not corrupted.');
+                    }
+
+                } catch (error) {
+                    console.error('Error processing PDF:', error);
+                    showError(`Failed to process the PDF: ${error.message}. Please ensure the file is a valid PDF.`);
+                }
+            }
+
+            async function analyzeContent(parts) {
+                console.log('=== analyzeContent started ===');
+                console.log('Number of parts:', parts.length);
+                parts.forEach((part, index) => {
+                    console.log(`Part ${index}:`, {
+                        mimeType: part.mimeType,
+                        dataLength: part.data.length,
+                        dataPreview: part.data.substring(0, 100) + '...'
+                    });
+                });
+                
+                showView('loading');
+                updateProgress(0);
+                loadingMessage.textContent = 'AI is analyzing the content... This may take a moment.';
+                
+                const apiKey = "AIzaSyD83AJjydBFFJaR92DorQ08NZNOpfJNSaU";
+                const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=${apiKey}`;
+
+                const prompt = `You are an expert exam-question analyst. Your task is to extract questions from exam/quiz images and return them in EXACT JSON format.
+
+CRITICAL INSTRUCTIONS:
+1) Look for ANY text that appears to be a question (ends with ?, contains question words like what/which/how, or is numbered)
+2) Look for ANY text that appears to be answer choices (lines starting with A, B, C, D, or numbered options)
+3) Even if you can only see partial text, extract what you can see
+4) If you see a question but can't determine the correct answer, make your best guess based on context
+5) If you see answer choices but can't determine which is correct, choose the first one as default
+6) IMPORTANT: Extract ALL questions you can see, don't skip any
+7) CRITICAL: Each image may contain multiple questions - extract them ALL
+8) CRITICAL: If you see question numbers (1, 2, 3, etc.), extract each numbered question separately
+
+SPECIAL INSTRUCTIONS FOR CHART/DIAGRAM QUESTIONS:
+9) If you see charts, diagrams, graphs, or visual elements:
+   - Describe the visual content in detail in the questionText
+   - Make the question self-explanatory so users can understand without seeing the image
+   - Example: "Based on the bar chart showing sales data for Q1-Q4, which quarter had the highest sales?"
+   - Example: "Looking at the pie chart of market share, which company has the largest percentage?"
+
+REQUIRED OUTPUT FORMAT - STRICT JSON:
+You MUST return ONLY a valid JSON array. Each question object MUST have these exact keys:
+- "questionText": string (the question text, make it self-explanatory for chart questions)
+- "options": array of strings (the answer choices, even if incomplete)
+- "correctAnswer": string (must be exactly one of the items in "options")
+- "explanation": string (brief explanation or "Based on the chart/diagram content")
+
+EXAMPLE FORMAT:
+[
+  {
+    "questionText": "Based on the bar chart showing sales data for Q1-Q4, which quarter had the highest sales?",
+    "options": ["A. Q1", "B. Q2", "C. Q3", "D. Q4"],
+    "correctAnswer": "C. Q3",
+    "explanation": "Based on the chart content, Q3 shows the highest sales bar"
+  },
+  {
+    "questionText": "Looking at the pie chart of market share, which company has the largest percentage?",
+    "options": ["A. Company A", "B. Company B", "C. Company C", "D. Company D"],
+    "correctAnswer": "B. Company B",
+    "explanation": "Based on the chart content, Company B has the largest pie slice"
+  }
+]
+
+CRITICAL RULES:
+- Return ONLY the JSON array, no other text
+- Each object must have all 4 required keys
+- "correctAnswer" must exactly match one of the items in "options"
+- Extract EVERY question you can see, don't miss any
+- If one image has multiple questions, create separate objects for each
+- For chart questions, make questionText self-explanatory
+- Do NOT include any explanations outside the JSON
+- Do NOT return an empty array unless images are completely blank
+
+If you cannot extract questions, return: []
+
+CRITICAL: You must respond with ONLY raw JSON. Do NOT include any Markdown formatting, code blocks, or other text.
+Do NOT use \`\`\`json or \`\`\` markers.
+Do NOT include any explanations outside the JSON.
+
+Remember: Return ONLY the raw JSON array, nothing else.`;
+
+                try {
+                    console.log('Starting image compression...');
+                    updateProgress(10);
+                    loadingMessage.textContent = 'Compressing images for optimal processing...';
+                    // check image data size, if too large, compress it
+                    const compressedParts = await compressImageParts(parts);
+                    console.log('Image compression completed. Compressed parts:', compressedParts.length);
+                    
+                    // build the correct API request format
+                    const payload = {
+                        contents: [{
+                            parts: [
+                                { text: prompt },
+                                ...compressedParts.map(part => ({
+                                    inlineData: {
+                                        mimeType: part.mimeType,
+                                        data: part.data
+                                    }
+                                }))
+                            ]
+                        }],
+                        generationConfig: {
+                            temperature: 0.1,
+                            topK: 40,
+                            topP: 0.95,
+                            maxOutputTokens: 8192,
+                        },
+                        safetySettings: [
+                            { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_NONE' },
+                            { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_NONE' },
+                            { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_NONE' },
+                            { category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_NONE' }
+                        ]
+                    };
+
+                    console.log('Payload built successfully');
+                    console.log('Sending API request with payload:', {
+                        numParts: payload.contents[0].parts.length,
+                        promptLength: prompt.length,
+                        totalDataSize: compressedParts.reduce((sum, part) => sum + part.data.length, 0)
+                    });
+
+                    updateProgress(30);
+                    loadingMessage.textContent = 'Sending data to AI for analysis...';
+
+                    // test API connection
+                    console.log('Testing API connection...');
+                    const testResponse = await fetch(apiUrl, {
+                        method: 'POST',
+                        headers: { 
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            contents: [{
+                                parts: [{ text: "Hello, this is a test." }]
+                            }]
+                        })
+                    });
+
+                    if (!testResponse.ok) {
+                        const testErrorText = await testResponse.text();
+                        console.error('API Test Failed:', testErrorText);
+                        throw new Error(`API test failed: ${testResponse.status} - ${testErrorText}`);
+                    }
+
+                    console.log('API test successful, proceeding with analysis...');
+
+                    updateProgress(50);
+                    loadingMessage.textContent = 'AI is processing your content...';
+
+                    console.log('Sending main API request...');
+                    const response = await fetch(apiUrl, {
+                        method: 'POST',
+                        headers: { 
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify(payload)
+                    });
+
+                    console.log('API response received, status:', response.status);
+
+                    updateProgress(70);
+                    loadingMessage.textContent = 'Processing AI response...';
+
+                    if (!response.ok) {
+                        const errorText = await response.text();
+                        console.error('API Error Response:', errorText);
+                        throw new Error(`API request failed, status code: ${response.status}. ${errorText}`);
+                    }
+
+                    console.log('Parsing API response...');
+                    const result = await response.json();
+                    console.log('API Response:', result);
+                    console.log('API Response Type:', typeof result);
+                    console.log('API Response Keys:', Object.keys(result));
+                    
+                    // check if there is an error
+                    if (result.error) {
+                        console.error('API Error:', result.error);
+                        throw new Error(`API Error: ${result.error.message || 'Unknown error'}`);
+                    }
+                    
+                    // try different response formats
+                    let responseText = null;
+                    
+                    // detailed response structure
+                    console.log('=== Detailed Response Structure ===');
+                    if (result.candidates) {
+                        console.log('Candidates found:', result.candidates.length);
+                        if (result.candidates[0]) {
+                            console.log('First candidate keys:', Object.keys(result.candidates[0]));
+                            if (result.candidates[0].content) {
+                                console.log('Content keys:', Object.keys(result.candidates[0].content));
+                                if (result.candidates[0].content.parts) {
+                                    console.log('Parts array length:', result.candidates[0].content.parts.length);
+                                    result.candidates[0].content.parts.forEach((part, index) => {
+                                        console.log(`Part ${index}:`, part);
+                                        console.log(`Part ${index} keys:`, Object.keys(part));
+                                    });
+                                }
+                            }
+                        }
+                    }
+                    console.log('=== End Response Structure ===');
+                    
+                    if (result.candidates && result.candidates[0] && result.candidates[0].content && result.candidates[0].content.parts && result.candidates[0].content.parts[0]) {
+                        responseText = result.candidates[0].content.parts[0].text;
+                        console.log('Found response in candidates[0].content.parts[0].text');
+                    } else if (result.candidates && result.candidates[0] && result.candidates[0].content && result.candidates[0].content.parts) {
+                        // try to find the part with text
+                        const textPart = result.candidates[0].content.parts.find(part => part.text);
+                        if (textPart) {
+                            responseText = textPart.text;
+                            console.log('Found response in candidates[0].content.parts with text');
+                        }
+                    } else if (result.promptFeedback) {
+                        // check if there is a prompt feedback
+                        console.log('Prompt feedback:', result.promptFeedback);
+                        throw new Error('API returned prompt feedback instead of content. This might indicate an issue with the request format.');
+                    }
+                    
+                    // try other possible response formats
+                    if (!responseText) {
+                        // check if there is a direct text response
+                        if (result.text) {
+                            responseText = result.text;
+                            console.log('Found response in result.text');
+                        } else if (result.content && result.content.text) {
+                            responseText = result.content.text;
+                            console.log('Found response in result.content.text');
+                        } else if (result.response && result.response.text) {
+                            responseText = result.response.text;
+                            console.log('Found response in result.response.text');
+                        }
+                    }
+                    
+                    if (!responseText) {
+                        console.error('Could not find response text in API result:', result);
+                        console.log('Available keys in result:', Object.keys(result));
+                        if (result.candidates && result.candidates[0]) {
+                            console.log('Available keys in candidates[0]:', Object.keys(result.candidates[0]));
+                            if (result.candidates[0].content) {
+                                console.log('Available keys in content:', Object.keys(result.candidates[0].content));
+                                if (result.candidates[0].content.parts) {
+                                    console.log('Parts structure:', result.candidates[0].content.parts);
+                                }
+                            }
+                        }
+                        
+                        //  check if the file size is too large
+                        const totalDataSize = parts.reduce((sum, part) => sum + part.data.length, 0);
+                        if (totalDataSize > 20 * 1024 * 1024) { // 20MB
+                            throw new Error('File size too large. Please try with a smaller PDF or fewer pages.');
+                        } else if (totalDataSize > 10 * 1024 * 1024) { // 10MB
+                            throw new Error('File size is large. Please try with a smaller PDF or contact support if the issue persists.');
+                        } else {
+                            throw new Error('Could not extract response text from API result. This might be due to content format or API limitations.');
+                        }
+                    }
+                    
+                    console.log('AI Response Text:', responseText);
+                    
+                    try {
+                        // clean the response text, remove Markdown code block format
+                        let cleanedResponseText = responseText.trim();
+                        
+                        // remove the ```json or ``` markers at the beginning
+                        if (cleanedResponseText.startsWith('```json')) {
+                            cleanedResponseText = cleanedResponseText.substring(7);
+                        } else if (cleanedResponseText.startsWith('```')) {
+                            cleanedResponseText = cleanedResponseText.substring(3);
+                        }
+                        
+                        // remove the ``` markers at the end
+                        if (cleanedResponseText.endsWith('```')) {
+                            cleanedResponseText = cleanedResponseText.substring(0, cleanedResponseText.length - 3);
+                        }
+                        
+                        // clean the escape characters
+                        cleanedResponseText = cleanedResponseText.replace(/\\"/g, '"');
+                        cleanedResponseText = cleanedResponseText.replace(/\\n/g, '\n');
+                        cleanedResponseText = cleanedResponseText.replace(/\\t/g, '\t');
+                        
+                        console.log('Cleaned response text:', cleanedResponseText);
+                        
+                        const parsedJson = JSON.parse(cleanedResponseText);
+                        if (parsedJson && Array.isArray(parsedJson) && parsedJson.length > 0) {
+                            updateProgress(90);
+                            loadingMessage.textContent = 'Preparing quiz cards...';
+                            console.log('JSON parsed successfully, starting quiz...');
+                            startQuiz(parsedJson);
+                        } else {
+                            showError("AI was unable to extract any questions. Please ensure the file is clear and contains questions in a standard format.");
+                        }
+                    } catch (parseError) {
+                        console.error('JSON Parse Error:', parseError);
+                        console.log('Raw response text:', responseText);
+                        
+                        // Show the raw response to help debug
+                        const errorMessage = `AI returned data in an unexpected format.
+
+Raw Response (first 500 chars):
+${responseText.substring(0, 500)}...
+
+This suggests the AI did not follow the JSON format instructions. Please try again or contact support if the issue persists.`;
+                        
+                        showError(errorMessage);
+                    }
+
+                } catch (error) {
+                    console.error('Error during AI analysis:', error);
+                    if (error.message.includes('400')) {
+                        showError(`API request failed: ${error.message}. This might be due to file size or format issues. Please try with a smaller file or different format.`);
+                    } else {
+                        showError(`Analysis failed: ${error.message}. Please check your network connection or try again later.`);
+                    }
+                }
+            }
+
+            // Helper: split parts into batches by approximate size limit (in bytes of base64 string length)
+            function splitIntoBatchesBySize(parts, maxBytesPerBatch) {
+                const batches = [];
+                let current = [];
+                let size = 0;
+                for (const part of parts) {
+                    const partSize = part.data.length;
+                    if (current.length > 0 && (size + partSize) > maxBytesPerBatch) {
+                        batches.push(current);
+                        current = [];
+                        size = 0;
+                    }
+                    current.push(part);
+                    size += partSize;
+                }
+                if (current.length > 0) batches.push(current);
+                return batches;
+            }
+
+            // Helper: extract text from Gemini response
+            function extractResponseText(result) {
+                if (!result) return null;
+                if (result.error) return null;
+                if (result.candidates && result.candidates[0] && result.candidates[0].content && Array.isArray(result.candidates[0].content.parts)) {
+                    const first = result.candidates[0].content.parts.find(p => typeof p.text === 'string');
+                    if (first && first.text) return first.text;
+                }
+                if (typeof result.text === 'string') return result.text;
+                if (result.content && typeof result.content.text === 'string') return result.content.text;
+                if (result.response && typeof result.response.text === 'string') return result.response.text;
+                return null;
+            }
+
+            // Helper: try to parse JSON array from a text blob
+            function tryParseQuestionsArray(text) {
+                if (!text || typeof text !== 'string') return null;
+                let cleaned = text.trim();
+                
+                console.log('=== tryParseQuestionsArray Debug ===');
+                console.log('Raw text to parse:', text.substring(0, 200) + '...');
+                
+                // Remove markdown code blocks
+                if (cleaned.startsWith('```json')) cleaned = cleaned.slice(7);
+                else if (cleaned.startsWith('```')) cleaned = cleaned.slice(3);
+                if (cleaned.endsWith('```')) cleaned = cleaned.slice(0, -3);
+                
+                // Clean escape characters
+                cleaned = cleaned.replace(/\\"/g, '"').replace(/\\n/g, '\n').replace(/\\t/g, '\t');
+                
+                console.log('Cleaned text:', cleaned.substring(0, 200) + '...');
+                
+                // Try direct JSON parse first
+                try {
+                    const parsed = JSON.parse(cleaned);
+                    console.log('Direct JSON parse successful:', parsed);
+                    if (Array.isArray(parsed) && parsed.length > 0) {
+                        // Validate the structure
+                        const isValid = parsed.every(item => 
+                            item && 
+                            typeof item === 'object' && 
+                            item.questionText && 
+                            item.options && 
+                            Array.isArray(item.options) && 
+                            item.options.length > 0 &&
+                            item.correctAnswer &&
+                            item.explanation
+                        );
+                        if (isValid) {
+                            console.log('Validation successful, returning parsed array');
+                            return parsed;
+                        } else {
+                            console.log('Validation failed - missing required fields');
+                        }
+                    }
+                } catch (error) {
+                    console.log('Direct JSON parse failed:', error.message);
+                }
+                
+                // Fallback 1: bracket slicing with validation
+                const start = cleaned.indexOf('[');
+                const end = cleaned.lastIndexOf(']');
+                if (start !== -1 && end !== -1 && end > start) {
+                    try {
+                        const sliced = cleaned.slice(start, end + 1);
+                        console.log('Trying bracket slicing with:', sliced.substring(0, 200) + '...');
+                        const parsed2 = JSON.parse(sliced);
+                        if (Array.isArray(parsed2) && parsed2.length > 0) {
+                            // Validate the structure
+                            const isValid = parsed2.every(item => 
+                                item && 
+                                typeof item === 'object' && 
+                                item.questionText && 
+                                item.options && 
+                                Array.isArray(item.options) && 
+                                item.options.length > 0 &&
+                                item.correctAnswer &&
+                                item.explanation
+                            );
+                            if (isValid) {
+                                console.log('Bracket slicing validation successful');
+                                return parsed2;
+                            } else {
+                                console.log('Bracket slicing validation failed');
+                            }
+                        }
+                    } catch (error) {
+                        console.log('Bracket slicing parse failed:', error.message);
+                    }
+                }
+                
+                // If we can't get valid JSON, return null instead of creating invalid data
+                console.warn('Could not parse valid JSON from AI response, returning null');
+                console.log('=== tryParseQuestionsArray Debug End ===');
+                return null;
+            }
+
+            // Call Gemini for one batch and return parsed questions array (or [])
+            async function analyzeSingleBatch(batchParts, batchIndex, totalBatches, apiUrl, basePrompt) {
+                loadingMessage.textContent = `AI is analyzing batch ${batchIndex + 1}/${totalBatches}...`;
+                
+                // Calculate the starting image index for this batch
+                // This is crucial for multi-image uploads
+                const startingImageIndex = batchIndex * batchParts.length;
+                
+                const payload = {
+                    contents: [{
+                        parts: [
+                            { text: basePrompt + `\n\nIMPORTANT: These images are from image index ${startingImageIndex}. Set the "imageIndex" field to ${startingImageIndex} for all questions extracted from these images.\n\nReturn ONLY raw JSON for the questions found in these images.` },
+                            ...batchParts.map(part => ({ inlineData: { mimeType: part.mimeType, data: part.data } }))
+                        ]
+                    }],
+                    generationConfig: {
+                        temperature: 0.1,
+                        topK: 40,
+                        topP: 0.95,
+                        maxOutputTokens: 8192,
+                    },
+                    safetySettings: [
+                        { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_NONE' },
+                        { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_NONE' },
+                        { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_NONE' },
+                        { category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_NONE' }
+                    ]
+                };
+
+                const resp = await fetch(apiUrl, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(payload)
                 });
-
-                if (!response.ok) {
-                    throw new Error(`API request failed, status code: ${response.status}`);
+                if (!resp.ok) {
+                    const errText = await resp.text();
+                    throw new Error(`Batch ${batchIndex + 1} request failed: ${resp.status} - ${errText}`);
                 }
-
-                const result = await response.json();
+                const json = await resp.json();
+                const text = extractResponseText(json);
+                const parsed = tryParseQuestionsArray(text);
                 
-                if (result.candidates && result.candidates[0].content && result.candidates[0].content.parts[0]) {
-                    const parsedJson = JSON.parse(result.candidates[0].content.parts[0].text);
-                    if (parsedJson && parsedJson.length > 0) {
-                        startQuiz(parsedJson);
-                    } else {
-                        showError("AI was unable to extract any questions from the image. Please ensure the image is clear and contains questions in a standard format.");
-                    }
-                } else {
-                     showError("AI returned data in an unexpected format. Please try again later.");
+                // Ensure all questions have the correct imageIndex
+                if (Array.isArray(parsed)) {
+                    return parsed.map(q => ({
+                        ...q,
+                        imageIndex: startingImageIndex
+                    }));
                 }
-
-            } catch (error) {
-                console.error('Error during AI analysis:', error);
-                showError(`Analysis failed: ${error.message}. Please check your network connection or try again later.`);
+                return [];
             }
-        }
-        
-        /**
-         * Fetch with exponential backoff retry mechanism.
-         * @param {string} url The URL to fetch.
-         * @param {object} options The fetch options.
-         * @param {number} retries Number of retries.
-         * @param {number} delay Initial delay in ms.
-         */
-        async function fetchWithRetry(url, options, retries = 3, delay = 1000) {
-            for (let i = 0; i < retries; i++) {
+
+            // New: analyze single image with correct imageIndex
+            async function analyzeSingleImage(imagePart, imageIndex, apiUrl, basePrompt) {
+                loadingMessage.textContent = `AI is analyzing image ${imageIndex + 1}...`;
+                
+                const payload = {
+                    contents: [{
+                        parts: [
+                            { text: basePrompt + `\n\nIMPORTANT: This image is from image index ${imageIndex}. Set the "imageIndex" field to ${imageIndex} for all questions extracted from this image.\n\nReturn ONLY raw JSON for the questions found in this image.` },
+                            { inlineData: { mimeType: imagePart.mimeType, data: imagePart.data } }
+                        ]
+                    }],
+                    generationConfig: {
+                        temperature: 0.1,
+                        topK: 40,
+                        topP: 0.95,
+                        maxOutputTokens: 8192,
+                    },
+                    safetySettings: [
+                        { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_NONE' },
+                        { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_NONE' },
+                        { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_NONE' },
+                        { category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_NONE' }
+                    ]
+                };
+
+                const resp = await fetch(apiUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                if (!resp.ok) {
+                    const errText = await resp.text();
+                    throw new Error(`Image ${imageIndex + 1} request failed: ${resp.status} - ${errText}`);
+                }
+                const json = await resp.json();
+                const text = extractResponseText(json);
+                const parsed = tryParseQuestionsArray(text);
+                
+                // Ensure all questions have the correct imageIndex
+                if (Array.isArray(parsed)) {
+                    const questionsWithIndex = parsed.map(q => ({
+                        ...q,
+                        imageIndex: imageIndex
+                    }));
+                    console.log(`Image ${imageIndex} returned ${questionsWithIndex.length} questions with imageIndex ${imageIndex}`);
+                    return questionsWithIndex;
+                }
+                console.log(`Image ${imageIndex} returned no valid questions`);
+                return [];
+            }
+
+            // New: analyze in batches to support many PDF pages
+            async function analyzeContentInBatches(parts) {
+                console.log('=== analyzeContentInBatches started ===');
+                showView('loading');
+                updateProgress(0);
+                loadingMessage.textContent = 'Preparing content for analysis...';
+
+                const apiKey = "";
+                const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=${apiKey}`;
+                const basePrompt = `You are an expert exam-question analyst. Your task is to extract questions from exam/quiz images and return them in EXACT JSON format.
+
+CRITICAL INSTRUCTIONS:
+1) Look for ANY text that appears to be a question (ends with ?, contains question words like what/which/how, or is numbered)
+2) Look for ANY text that appears to be answer choices (lines starting with A, B, C, D, or numbered options)
+3) Even if you can only see partial text, extract what you can see
+4) If you see a question but can't determine the correct answer, make your best guess based on context
+5) If you see answer choices but can't determine which is correct, choose the first one as default
+6) IMPORTANT: Extract ALL questions you can see, don't skip any
+7) CRITICAL: Each image may contain multiple questions - extract them ALL
+8) CRITICAL: If you see question numbers (1, 2, 3, etc.), extract each numbered question separately
+
+SPECIAL INSTRUCTIONS FOR CHART/DIAGRAM QUESTIONS:
+9) If you see charts, diagrams, graphs, or visual elements:
+   - Describe the visual content in detail in the questionText
+   - Make the question self-explanatory so users can understand without seeing the image
+   - Example: "Based on the bar chart showing sales data for Q1-Q4, which quarter had the highest sales?"
+   - Example: "Looking at the pie chart of market share, which company has the largest percentage?"
+
+REQUIRED OUTPUT FORMAT - STRICT JSON:
+You MUST return ONLY a valid JSON array. Each question object MUST have these exact keys:
+- "questionText": string (the question text, make it self-explanatory for chart questions)
+- "options": array of strings (the answer choices, even if incomplete)
+- "correctAnswer": string (must be exactly one of the options)
+- "explanation": string (brief explanation or "Based on the chart/diagram content")
+- "imageIndex": number (the index of the image this question came from, starting from 0)
+
+EXAMPLE FORMAT:
+[
+  {
+    "questionText": "Based on the bar chart showing sales data for Q1-Q4, which quarter had the highest sales?",
+    "options": ["A. Q1", "B. Q2", "C. Q3", "D. Q4"],
+    "correctAnswer": "C. Q3",
+    "explanation": "Based on the chart content, Q3 shows the highest sales bar",
+    "imageIndex": 0
+  },
+  {
+    "questionText": "Looking at the pie chart of market share, which company has the largest percentage?",
+    "options": ["A. Company A", "B. Company B", "C. Company C", "D. Company D"],
+    "correctAnswer": "B. Company B",
+    "explanation": "Based on the chart content, Company B has the largest pie slice",
+    "imageIndex": 0
+  }
+]
+
+CRITICAL RULES:
+- Return ONLY the JSON array, no other text
+- Each object must have all 5 required keys
+- "correctAnswer" must exactly match one of the items in "options"
+- "imageIndex" must be a number indicating which image the question came from
+- Extract EVERY question you can see, don't miss any
+- If one image has multiple questions, create separate objects for each
+- For chart questions, make questionText self-explanatory
+- Do NOT include any explanations outside the JSON
+- Do NOT return an empty array unless images are completely blank
+
+If you cannot extract questions, return: []`;
+
                 try {
-                    const response = await fetch(url, options);
-                    if (response.status !== 429 && response.status < 500) { // Don't retry on client errors (except 429)
-                        return response;
+                    // Compress once for all parts
+                    updateProgress(20);
+                    loadingMessage.textContent = 'Compressing images...';
+                    const compressed = await compressImageParts(parts);
+
+                    // For multiple images, process each image separately to maintain imageIndex
+                    const allQuestions = [];
+                    const totalImages = compressed.length;
+                    
+                    console.log(`Processing ${totalImages} images separately...`);
+                    
+                    for (let i = 0; i < totalImages; i++) {
+                        const imagePart = compressed[i];
+                        console.log(`Analyzing image ${i + 1}/${totalImages} (index: ${i})`);
+                        
+                        // map progress from 30 to 90 across images
+                        const progress = 30 + Math.floor((i / totalImages) * 60);
+                        updateProgress(progress);
+                        
+                        // Process single image with correct imageIndex
+                        const questions = await analyzeSingleImage(imagePart, i, apiUrl, basePrompt);
+                        if (questions && questions.length > 0) {
+                            allQuestions.push(...questions);
+                        }
                     }
-                    // Wait before retrying
-                    await new Promise(resolve => setTimeout(resolve, delay * Math.pow(2, i)));
+
+                    updateProgress(90);
+                    loadingMessage.textContent = 'Merging results...';
+
+                    // For multiple images, we want ALL questions from ALL images
+                    // Only deduplicate if it's the exact same question from the same image
+                    const seen = new Set();
+                    const merged = [];
+                    for (const q of allQuestions) {
+                        if (!q || !q.questionText) continue;
+                        // Create unique key that includes both question text and image index
+                        const key = `${q.questionText.trim()}_${q.imageIndex}`;
+                        if (!seen.has(key)) {
+                            seen.add(key);
+                            merged.push(q);
+                        }
+                    }
+
+                    if (merged.length === 0) {
+                        console.error('No questions extracted from any image. This suggests AI cannot recognize the content format.');
+                        showError('AI cannot recognize questions in your images. Please ensure the images contain clear, text-based questions in a standard format.');
+                        return;
+                    }
+
+                    updateProgress(95);
+                    loadingMessage.textContent = 'Preparing quiz cards...';
+                    
+                    console.log('=== Final Results ===');
+                    console.log(`Total questions extracted: ${merged.length}`);
+                    console.log('Questions by image index:');
+                    const questionsByImage = {};
+                    merged.forEach((q, i) => {
+                        const imgIdx = q.imageIndex || 'unknown';
+                        if (!questionsByImage[imgIdx]) questionsByImage[imgIdx] = [];
+                        questionsByImage[imgIdx].push(q.questionText.substring(0, 50) + '...');
+                    });
+                    Object.keys(questionsByImage).forEach(imgIdx => {
+                        console.log(`Image ${imgIdx}: ${questionsByImage[imgIdx].length} questions`);
+                    });
+                    
+                    startQuiz(merged);
                 } catch (error) {
-                    if (i === retries - 1) throw error;
-                    await new Promise(resolve => setTimeout(resolve, delay * Math.pow(2, i)));
+                    console.error('Error during batched analysis:', error);
+                    showError(`Analysis failed: ${error.message}`);
                 }
             }
-        }
 
-
-        /**
-         * Initializes the quiz state with data from the API.
-         * @param {Array} questions An array of question objects.
-         */
-        function startQuiz(questions) {
-            quizData = questions;
-            currentQuestionIndex = 0;
-            renderCurrentQuestion();
-            showView('quiz');
-        }
-
-        /**
-         * Renders the current question onto the card.
-         */
-        function renderCurrentQuestion() {
-            if (currentQuestionIndex >= quizData.length) {
-                showEndScreen();
-                return;
+            // new: compress image data to meet API limits
+            async function compressImageParts(parts) {
+                console.log('=== compressImageParts started ===');
+                const maxDataSize = 4 * 1024 * 1024; // 4MB limit
+                const compressedParts = [];
+                
+                for (let i = 0; i < parts.length; i++) {
+                    const part = parts[i];
+                    console.log(`Processing part ${i}:`, {
+                        mimeType: part.mimeType,
+                        originalSize: part.data.length,
+                        needsCompression: part.data.length > maxDataSize
+                    });
+                    
+                    let compressedData = part.data;
+                    
+                    // if the data is too large, try to compress it
+                    if (part.data.length > maxDataSize) {
+                        try {
+                            console.log(`Compressing part ${i}...`);
+                            compressedData = await compressImageData(part.data, part.mimeType);
+                            console.log(`Part ${i} compressed:`, {
+                                originalSize: part.data.length,
+                                compressedSize: compressedData.length,
+                                compressionRatio: (compressedData.length / part.data.length * 100).toFixed(2) + '%'
+                            });
+                        } catch (error) {
+                            console.warn(`Failed to compress part ${i}, using original:`, error);
+                        }
+                    }
+                    
+                    // if the compressed data is still too large, try more aggressive compression
+                    if (compressedData.length > maxDataSize * 2) {
+                        try {
+                            console.log(`Part ${i} still too large, applying aggressive compression...`);
+                            compressedData = await compressImageData(compressedData, part.mimeType, 0.3, 512); // lower quality and resolution
+                            console.log(`Part ${i} aggressively compressed:`, {
+                                originalSize: part.data.length,
+                                finalSize: compressedData.length,
+                                compressionRatio: (compressedData.length / part.data.length * 100).toFixed(2) + '%'
+                            });
+                        } catch (error) {
+                            console.warn(`Failed aggressive compression for part ${i}:`, error);
+                        }
+                    }
+                    
+                    compressedParts.push({
+                        mimeType: part.mimeType,
+                        data: compressedData
+                    });
+                }
+                
+                const totalCompressedSize = compressedParts.reduce((sum, part) => sum + part.data.length, 0);
+                console.log(`=== compressImageParts completed ===`);
+                console.log(`Total compressed size: ${totalCompressedSize} bytes (${(totalCompressedSize / 1024 / 1024).toFixed(2)} MB)`);
+                
+                return compressedParts;
             }
 
-            const question = quizData[currentQuestionIndex];
+            // new: compress image data
+            async function compressImageData(base64Data, mimeType, quality = 0.6, maxDimension = 1024) {
+                console.log('=== compressImageData started ===');
+                return new Promise((resolve, reject) => {
+                    const img = new Image();
+                    img.onload = () => {
+                        console.log('Image loaded for compression:', {
+                            originalWidth: img.width,
+                            originalHeight: img.height,
+                            targetQuality: quality,
+                            targetMaxDimension: maxDimension
+                        });
+                        
+                        const canvas = document.createElement('canvas');
+                        const ctx = canvas.getContext('2d');
+                        
+                        // calculate new dimensions, keep aspect ratio
+                        let { width, height } = img;
+                        
+                        if (width > height && width > maxDimension) {
+                            height = (height * maxDimension) / width;
+                            width = maxDimension;
+                        } else if (height > maxDimension) {
+                            height = maxDimension;
+                            width = (width * maxDimension) / height;
+                        }
+                        
+                        console.log('Compressed dimensions:', { width, height });
+                        
+                        canvas.width = width;
+                        canvas.height = height;
+                        
+                        ctx.drawImage(img, 0, 0, width, height);
+                        
+                        // use specified quality compression
+                        const compressedDataUrl = canvas.toDataURL(mimeType, quality);
+                        const compressedBase64 = compressedDataUrl.split(',')[1];
+                        
+                        console.log('Image compression completed');
+                        resolve(compressedBase64);
+                    };
+                    
+                    img.onerror = (error) => {
+                        console.error('Image compression failed:', error);
+                        reject(error);
+                    };
+                    
+                    img.src = `data:${mimeType};base64,${base64Data}`;
+                });
+            }
             
-            // Reset card state
-            card.classList.remove('is-flipped');
-            showAnswerButton.classList.remove('hidden');
-            nextQuestionButton.classList.add('hidden');
 
-            // Populate front of the card
-            questionText.textContent = `Q: ${question.questionText}`;
-            optionsContainer.innerHTML = '';
-            question.options.forEach(option => {
-                const optionElement = document.createElement('div');
-                optionElement.className = 'p-3 border border-gray-200 rounded-lg';
-                optionElement.textContent = option;
-                optionsContainer.appendChild(optionElement);
-            });
 
-            // Populate back of the card
-            correctAnswer.textContent = question.correctAnswer;
-            explanationText.textContent = question.explanation;
-
-            // Update progress
-            quizProgress.textContent = `Question ${currentQuestionIndex + 1} / ${quizData.length}`;
-        }
-        
-        /**
-         * Shows a screen when all questions are completed.
-         */
-        function showEndScreen() {
-            quizSection.innerHTML = `
-                <div class="text-center py-12">
-                    <h2 class="text-2xl font-bold text-green-600 mb-4">Congrats! You've finished all quizzes!</h2>
-                    <p class="text-gray-600 mb-8">By reviewing what you have learned and acquiring new knowledge, you can become a master.</p>
-                    <button id="end-restart-button" class="px-8 py-3 bg-blue-600 text-white font-semibold rounded-lg hover:bg-blue-700 transition">Do it again</button>
-                </div>
-            `;
-            document.getElementById('end-restart-button').addEventListener('click', resetApp);
-        }
-
-        /**
-         * Flips the card to show the answer.
-         */
-        function flipCard() {
-            card.classList.add('is-flipped');
-            showAnswerButton.classList.add('hidden');
-            nextQuestionButton.classList.remove('hidden');
-        }
-
-        /**
-         * Moves to the next question in the quiz.
-         */
-        function showNextQuestion() {
-            currentQuestionIndex++;
-            renderCurrentQuestion();
-        }
-
-        /**
-         * Resets the entire application to the initial upload state.
-         */
-        function resetApp() {
-            quizData = [];
-            currentQuestionIndex = 0;
-            lastUploadedFile = null;
-            fileInput.value = ''; // Clear file input
-            fileNameDisplay.textContent = '';
-            // Restore original quiz section if it was replaced by the end screen
-            if (!document.getElementById('card')) {
-                 location.reload(); // Simple way to restore state
+            function startQuiz(questions) {
+                updateProgress(100);
+                setTimeout(() => {
+                    console.log('=== startQuiz Debug ===');
+                    console.log('Received questions:', questions);
+                    console.log('Questions length:', questions.length);
+                    if (questions.length > 0) {
+                        console.log('First question structure:', questions[0]);
+                        console.log('First question keys:', Object.keys(questions[0]));
+                    }
+                    
+                    quizData = questions;
+                    currentQuestionIndex = 0;
+                    renderCurrentQuestion();
+                    showView('quiz');
+                    console.log('=== startQuiz Debug End ===');
+                }, 500); // a short delay to show 100% progress
             }
-            showView('upload');
-        }
-        
-        /**
-         * Controls which main section is visible.
-         * @param {'upload' | 'loading' | 'error' | 'quiz'} viewName The view to display.
-         */
-        function showView(viewName) {
-            uploadSection.classList.add('hidden');
-            loadingSection.classList.add('hidden');
-            errorSection.classList.add('hidden');
-            quizSection.classList.add('hidden');
 
-            switch(viewName) {
-                case 'upload':
-                    uploadSection.classList.remove('hidden');
-                    break;
-                case 'loading':
-                    loadingSection.classList.remove('hidden');
-                    break;
-                case 'error':
-                    errorSection.classList.remove('hidden');
-                    break;
-                case 'quiz':
-                    quizSection.classList.remove('hidden');
-                    break;
+            function renderCurrentQuestion() {
+                if (currentQuestionIndex >= quizData.length) {
+                    showEndScreen();
+                    return;
+                }
+
+                const question = quizData[currentQuestionIndex];
+                
+                // Debug logging
+                console.log('=== renderCurrentQuestion Debug ===');
+                console.log('Current question:', question);
+                console.log('Question text:', question.questionText);
+                console.log('Options:', question.options);
+                console.log('Correct answer:', question.correctAnswer);
+                console.log('Explanation:', question.explanation);
+                console.log('Image index:', question.imageIndex);
+                
+                // HTML structure validation
+                console.log('=== HTML Structure Validation ===');
+                const questionTextElement = document.getElementById('question-text');
+                const optionsContainerElement = document.getElementById('options-container');
+                const correctAnswerElement = document.getElementById('correct-answer');
+                const explanationTextElement = document.getElementById('explanation-text');
+                
+                console.log('Question text element found:', !!questionTextElement);
+                console.log('Options container element found:', !!optionsContainerElement);
+                console.log('Correct answer element found:', !!correctAnswerElement);
+                console.log('Explanation text element found:', !!explanationTextElement);
+                
+                if (questionTextElement) {
+                    console.log('Question text element tag:', questionTextElement.tagName);
+                    console.log('Question text element classes:', questionTextElement.className);
+                    console.log('Question text element computed styles:', window.getComputedStyle(questionTextElement));
+                }
+                
+                if (optionsContainerElement) {
+                    console.log('Options container element tag:', optionsContainerElement.tagName);
+                    console.log('Options container element classes:', optionsContainerElement.className);
+                    console.log('Options container element computed styles:', window.getComputedStyle(optionsContainerElement));
+                }
+                
+                card.classList.remove('is-flipped');
+                showAnswerButton.classList.remove('hidden');
+                nextQuestionButton.classList.add('hidden');
+
+                // Show/hide question image if available
+                const imageContainer = document.getElementById('question-image-container');
+                const questionImage = document.getElementById('question-image');
+                
+                // DISABLED: Image display functionality
+                // Always hide images for now to focus on text display
+                imageContainer.classList.add('hidden');
+                console.log('Image display disabled - focusing on text only');
+
+                // Display question text (always show as text)
+                console.log('Setting question text to:', `Q: ${question.questionText}`);
+                questionText.textContent = `Q: ${question.questionText}`;
+                
+                // Clean up any test styles and use proper styling
+                questionText.style.display = 'block';
+                questionText.style.visibility = 'visible';
+                questionText.style.opacity = '1';
+                questionText.style.color = '#1f2937';
+                questionText.style.backgroundColor = 'transparent';
+                questionText.style.border = 'none';
+                questionText.style.padding = '0';
+                questionText.style.margin = '0';
+                questionText.style.position = 'static';
+                questionText.style.zIndex = 'auto';
+                console.log('Question text element cleaned and styled');
+                
+                // Clean up options container
+                optionsContainer.style.display = 'block';
+                optionsContainer.style.visibility = 'visible';
+                optionsContainer.style.opacity = '1';
+                optionsContainer.style.position = 'static';
+                optionsContainer.style.zIndex = 'auto';
+                optionsContainer.style.backgroundColor = 'transparent';
+                optionsContainer.style.border = 'none';
+                optionsContainer.style.padding = '0';
+                optionsContainer.style.margin = '0';
+                
+                // Clear and recreate options (always show as clickable text)
+                optionsContainer.innerHTML = '';
+                console.log('Creating options for:', question.options);
+                
+                question.options.forEach(optionText => {
+                    const optionElement = document.createElement('div');
+                    optionElement.className = 'p-4 border-2 border-gray-200 rounded-xl transition-all duration-200 cursor-pointer hover:bg-blue-50 hover:border-blue-400 hover:shadow-md transform hover:scale-105';
+                    optionElement.textContent = optionText;
+                    optionElement.dataset.optionText = optionText;
+                    optionElement.addEventListener('click', handleOptionClick);
+                    
+                    optionsContainer.appendChild(optionElement);
+                    console.log('Added option:', optionText);
+                });
+
+                // Set answer and explanation (always show as text)
+                console.log('Setting correct answer to:', question.correctAnswer);
+                correctAnswer.textContent = question.correctAnswer;
+                console.log('Setting explanation to:', question.explanation);
+                explanationText.textContent = question.explanation;
+
+                quizProgress.textContent = `Question ${currentQuestionIndex + 1} / ${quizData.length}`;
+                console.log('=== renderCurrentQuestion Debug End ===');
             }
-        }
-        
-        /**
-         * Displays an error message to the user.
-         * @param {string} message The error message to show.
-         */
-        function showError(message) {
-            errorMessage.textContent = message;
-            showView('error');
-        }
+            
+            function handleOptionClick(event) {
+                const clickedOption = event.currentTarget;
+                const question = quizData[currentQuestionIndex];
+                const selectedAnswer = clickedOption.dataset.optionText;
+                const correctAnswerText = question.correctAnswer;
 
+                const isCorrect = selectedAnswer.trim() === correctAnswerText.trim();
+
+                const allOptions = optionsContainer.querySelectorAll('div');
+                allOptions.forEach(opt => {
+                    opt.classList.add('no-pointer-events'); 
+                    opt.classList.remove('hover:bg-blue-50', 'hover:border-blue-400'); 
+                });
+
+                if (isCorrect) {
+                    clickedOption.classList.remove('border-gray-300');
+                    clickedOption.classList.add('bg-green-100', 'border-green-500', 'border-2');
+                } else {
+                    clickedOption.classList.remove('border-gray-300');
+                    clickedOption.classList.add('bg-red-100', 'border-red-500', 'border-2');
+                    revealCorrectAnswer();
+                }
+
+                flipCard();
+            }
+
+            function revealCorrectAnswer() {
+                const correctAnswerText = quizData[currentQuestionIndex].correctAnswer;
+                const allOptions = optionsContainer.querySelectorAll('div');
+                
+                allOptions.forEach(opt => {
+                    opt.classList.add('no-pointer-events');
+                    opt.classList.remove('hover:bg-blue-50', 'hover:border-blue-400');
+
+                    if (opt.dataset.optionText.trim() === correctAnswerText.trim()) {
+                        opt.classList.remove('border-gray-300');
+                        opt.classList.add('bg-green-100', 'border-green-500', 'border-2');
+                    }
+                });
+            }
+
+            function showEndScreen() {
+                quizSection.innerHTML = `
+                    <div class="text-center py-12">
+                        <h2 class="text-2xl font-bold text-green-600 mb-4">Congrats! You've finished all quizzes!</h2>
+                        <p class="text-gray-600 mb-8">By reviewing what you have learned and acquiring new knowledge, you can become a master.</p>
+                        <button id="end-restart-button" class="px-8 py-3 bg-blue-600 text-white font-semibold rounded-lg hover:bg-blue-700 transition">Do it again</button>
+                    </div>
+                `;
+                document.getElementById('end-restart-button').addEventListener('click', resetApp);
+            }
+
+            function flipCard() {
+                card.classList.add('is-flipped');
+                showAnswerButton.classList.add('hidden');
+                nextQuestionButton.classList.remove('hidden');
+            }
+
+            function showNextQuestion() {
+                currentQuestionIndex++;
+                renderCurrentQuestion();
+            }
+
+            function resetApp() {
+                quizData = [];
+                currentQuestionIndex = 0;
+                lastUploadedFile = null;
+                fileInput.value = '';
+                fileNameDisplay.textContent = '';
+                updateProgress(0); // reset progress bar
+                
+                // Clear uploaded files and hide controls
+                window.uploadedImageFiles = null;
+                window.uploadedImageParts = null;
+                uploadControls.classList.add('hidden');
+                
+                if (!document.getElementById('card')) {
+                     location.reload();
+                }
+                showView('upload');
+            }
+            
+            function showView(viewName) {
+                uploadSection.classList.add('hidden');
+                loadingSection.classList.add('hidden');
+                errorSection.classList.add('hidden');
+                quizSection.classList.add('hidden');
+
+                switch(viewName) {
+                    case 'upload':
+                        uploadSection.classList.remove('hidden');
+                        break;
+                    case 'loading':
+                        loadingSection.classList.remove('hidden');
+                        break;
+                    case 'error':
+                        errorSection.classList.remove('hidden');
+                        break;
+                    case 'quiz':
+                        quizSection.classList.remove('hidden');
+                        break;
+                }
+            }
+            
+            function showError(message) {
+                errorMessage.textContent = message;
+                showView('error');
+            }
+
+            async function testApiConnection() {
+                apiStatus.textContent = 'Testing API connection...';
+                try {
+                    const apiKey = "AIzaSyD83AJjydBFFJaR92DorQ08NZNOpfJNSaU";
+                    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=${apiKey}`;
+
+                    const prompt = "Hello, Gemini! Please respond with just 'Hello back!'";
+                    const payload = {
+                        contents: [{
+                            parts: [{ text: prompt }]
+                        }],
+                        generationConfig: {
+                            temperature: 0.1,
+                            topK: 40,
+                            topP: 0.95,
+                            maxOutputTokens: 8192,
+                        }
+                    };
+
+                    console.log('Testing API with payload:', payload);
+
+                    const response = await fetch(apiUrl, {
+                        method: 'POST',
+                        headers: { 
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify(payload)
+                    });
+
+                    if (response.ok) {
+                        const result = await response.json();
+                        console.log('Test API Response:', result);
+                        console.log('Test Response Structure:', {
+                            type: typeof result,
+                            keys: Object.keys(result),
+                            hasCandidates: !!result.candidates,
+                            candidatesLength: result.candidates ? result.candidates.length : 0
+                        });
+                        
+                        if (result.candidates && result.candidates[0]) {
+                            console.log('First candidate:', result.candidates[0]);
+                            if (result.candidates[0].content) {
+                                console.log('Content:', result.candidates[0].content);
+                                if (result.candidates[0].content.parts) {
+                                    console.log('Parts:', result.candidates[0].content.parts);
+                                }
+                            }
+                        }
+                        
+                        apiStatus.textContent = 'API Connection Successful! Check console for details.';
+                        apiStatus.classList.remove('text-red-400', 'text-green-400');
+                        apiStatus.classList.add('text-green-400');
+                        alert('API connection successful! Check browser console for response details.');
+                    } else {
+                        const errorText = await response.text();
+                        console.error('Test API Error:', errorText);
+                        apiStatus.textContent = `API Connection Failed: ${response.status} - ${errorText}`;
+                        apiStatus.classList.remove('text-green-400', 'text-red-400');
+                        apiStatus.classList.add('text-red-400');
+                        alert(`API connection failed. Status: ${response.status}. Message: ${errorText}`);
+                    }
+                } catch (error) {
+                    console.error('Test API Error:', error);
+                    apiStatus.textContent = `API Connection Error: ${error.message}`;
+                    apiStatus.classList.remove('text-green-400', 'text-red-400');
+                    apiStatus.classList.add('text-red-400');
+                    alert(`API connection error: ${error.message}`);
+                }
+            }
+
+            async function testPdfContentRecognition() {
+                if (!lastUploadedFile || !lastUploadedFile.name.toLowerCase().endsWith('.pdf')) {
+                    alert('Please upload a PDF file first to test content recognition.');
+                    return;
+                }
+
+                apiStatus.textContent = 'Testing PDF content recognition...';
+                try {
+                    // Convert PDF to images first
+                    const arrayBuffer = await lastUploadedFile.arrayBuffer();
+                    const typedarray = new Uint8Array(arrayBuffer);
+                    const pdf = await pdfjsLib.getDocument(typedarray).promise;
+                    
+                    // Just process first 2 pages for testing
+                    const testPages = Math.min(2, pdf.numPages);
+                    const imageParts = [];
+                    
+                    for (let i = 1; i <= testPages; i++) {
+                        const page = await pdf.getPage(i);
+                        const viewport = page.getViewport({ scale: 1.0 });
+                        const canvas = document.createElement('canvas');
+                        const context = canvas.getContext('2d');
+                        canvas.height = viewport.height;
+                        canvas.width = viewport.width;
+                        
+                        const renderContext = { canvasContext: context, viewport: viewport };
+                        await page.render(renderContext).promise;
+                        
+                        const base64Data = canvas.toDataURL('image/jpeg', 0.6).split(',')[1];
+                        imageParts.push({ mimeType: 'image/jpeg', data: base64Data });
+                    }
+
+                    // Test with a simple content recognition prompt
+                    const apiKey = "AIzaSyD83AJjydBFFJaR92DorQ08NZNOpfJNSaU";
+                    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=${apiKey}`;
+                    
+                    const testPrompt = `Look at these PDF page images and tell me what you see. Describe:
+1. What type of content is on each page?
+2. Are there any questions, diagrams, or text?
+3. What is the layout/structure?
+4. Can you identify any question numbers or multiple choice options?
+
+Be descriptive about what you observe.`;
+
+                    const payload = {
+                        contents: [{
+                            parts: [
+                                { text: testPrompt },
+                                ...imageParts.map(part => ({
+                                    inlineData: { mimeType: part.mimeType, data: part.data }
+                                }))
+                            ]
+                        }],
+                        generationConfig: { temperature: 0.1, maxOutputTokens: 2048 }
+                    };
+
+                    const response = await fetch(apiUrl, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+
+                    if (response.ok) {
+                        const result = await response.json();
+                        const text = extractResponseText(result);
+                        console.log('PDF Content Recognition Test Result:', text);
+                        apiStatus.textContent = 'PDF Content Recognition Test Complete! Check console for details.';
+                        alert(`PDF Content Recognition Test Complete!\n\nAI Response:\n${text}\n\nCheck browser console for full details.`);
+                    } else {
+                        const errorText = await response.text();
+                        throw new Error(`Test failed: ${response.status} - ${errorText}`);
+                    }
+                } catch (error) {
+                    console.error('PDF Content Recognition Test Error:', error);
+                    apiStatus.textContent = `PDF Content Recognition Test Failed: ${error.message}`;
+                    alert(`PDF Content Recognition Test Failed: ${error.message}`);
+                }
+            }
+
+            // Function to view PDF images for debugging
+            function viewPdfImages() {
+                if (!window.pdfImageParts || window.pdfImageParts.length === 0) {
+                    alert('No PDF images available to view. Please upload a PDF first.');
+                    return;
+                }
+
+                // Create a modal to display images
+                const modal = document.createElement('div');
+                modal.className = 'fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50';
+                modal.innerHTML = `
+                    <div class="bg-white rounded-lg p-6 max-w-4xl max-h-[90vh] overflow-auto">
+                        <div class="flex justify-between items-center mb-4">
+                            <h3 class="text-lg font-semibold">PDF Page Images (${window.pdfImageParts.length} pages)</h3>
+                            <button class="text-gray-500 hover:text-gray-700 text-2xl" onclick="this.closest('.fixed').remove()">&times;</button>
+                        </div>
+                        <div class="space-y-4">
+                            ${window.pdfImageParts.map((part, index) => `
+                                <div class="border rounded-lg p-4">
+                                    <h4 class="font-medium mb-2">Page ${index + 1}</h4>
+                                    <img src="data:image/jpeg;base64,${part.data}" class="max-w-full h-auto border rounded" alt="Page ${index + 1}">
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                `;
+                
+                document.body.appendChild(modal);
+                modal.addEventListener('click', (e) => {
+                    if (e.target === modal) modal.remove();
+                });
+            }
+
+            // ... existing code ...
+            // Accumulator for images selected across multiple actions
+            // NOTE: declared earlier in the file; do not redeclare here.
+            
+            function isPdfFile(file) {
+                if (!file) return false;
+                const name = (file.name || '').toLowerCase();
+                return file.type === 'application/pdf' || name.endsWith('.pdf');
+            }
+            
+            function isImageFile(file) {
+                return file && (file.type?.startsWith('image/') || /\.(png|jpe?g|gif|webp)$/i.test(file.name || ''));
+            }
+            
+            // Append or switch based on incoming selection
+            function processNewFiles(fileList) {
+                const files = Array.from(fileList || []);
+                if (files.length === 0) return;
+                
+                // If any PDF appears, treat as exclusive task
+                const pdf = files.find(isPdfFile);
+                if (pdf) {
+                    accumulatedImageFiles = []; // clear images
+                    fileInput.value = '';
+                    updateFileListUI([]);
+                    handlePdfFile(pdf);
+                    return;
+                }
+                
+                // Otherwise, append images to accumulation
+                const newImages = files.filter(isImageFile);
+                if (newImages.length === 0) return;
+                
+                // Deduplicate by name+size to avoid duplicates when re-adding
+                const keyOf = f => `${f.name}|${f.size}`;
+                const map = new Map(accumulatedImageFiles.map(f => [keyOf(f), f]));
+                for (const img of newImages) {
+                    const k = keyOf(img);
+                    if (!map.has(k)) map.set(k, img);
+                }
+                accumulatedImageFiles = Array.from(map.values());
+                
+                updateFileListUI(accumulatedImageFiles);
+                uploadControls.classList.remove('hidden');
+            }
+            
+            function updateFileListUI(files) {
+                if (!files || files.length === 0) {
+                    fileNameDisplay.innerHTML = '';
+                    uploadControls.classList.add('hidden');
+                    return;
+                }
+                const listHtml = files.map((f, i) => `<div class="text-left">${i + 1}. ${f.name}</div>`).join('');
+                fileNameDisplay.innerHTML = `
+                    <div class="mb-2"><strong>Selected ${files.length} image(s):</strong></div>
+                    <div class="max-h-32 overflow-y-auto bg-gray-50 p-2 rounded text-xs">${listHtml}</div>
+                `;
+            }
+            
+            async function startAccumulatedImageAnalysis() {
+                if (!accumulatedImageFiles || accumulatedImageFiles.length === 0) {
+                    showError('No images to analyze. Please upload one or more images.');
+                    return;
+                }
+                
+                showView('loading');
+                updateProgress(0);
+                loadingMessage.textContent = `Reading ${accumulatedImageFiles.length} image(s)...`;
+                
+                try {
+                    // Read all images to base64 parts
+                    const parts = [];
+                    for (let i = 0; i < accumulatedImageFiles.length; i++) {
+                        const f = accumulatedImageFiles[i];
+                        // eslint-disable-next-line no-await-in-loop
+                        const data = await readFileAsBase64(f);
+                        parts.push({ mimeType: f.type || 'image/jpeg', data, fileName: f.name });
+                    }
+                    analyzeContentInBatches(parts);
+                } catch (err) {
+                    console.error('Failed to read selected images:', err);
+                    showError('Failed to read selected images.');
+                }
+            }
+            
+            function clearAccumulatedFiles() {
+                accumulatedImageFiles = [];
+                fileInput.value = '';
+                updateFileListUI([]);
+            }
+            // ... existing code ...
+        });
     </script>
 </body>
 </html>
