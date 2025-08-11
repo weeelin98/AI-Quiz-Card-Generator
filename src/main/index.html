@@ -6,6 +6,8 @@
     <title>AI Quiz Card Generator</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- 更新PDF.js库版本 -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
     <style>
         body {
             font-family: 'Inter', sans-serif;
@@ -31,6 +33,9 @@
         @keyframes spin {
             to { transform: rotate(360deg); }
         }
+        .no-pointer-events {
+            pointer-events: none;
+        }
     </style>
 </head>
 <body class="bg-gray-100 text-gray-800 flex flex-col items-center justify-center min-h-screen p-4">
@@ -38,17 +43,25 @@
     <div class="w-full max-w-2xl mx-auto bg-white rounded-xl shadow-lg p-6 md:p-8">
         <div id="upload-section">
             <h1 class="text-2xl md:text-3xl font-bold text-center text-gray-900 mb-2">AI Quiz Card Generator</h1>
-            <p class="text-center text-gray-500 mb-6">Upload a question image and let AI turn it into study cards for you.</p>
+            <p class="text-center text-gray-500 mb-6">Upload an image or a PDF and let AI turn it into study cards for you.</p>
+            
+            <!-- 添加API测试按钮 -->
+            <div class="text-center mb-4">
+                <button id="test-api-button" class="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition text-sm">
+                    Test API Connection
+                </button>
+                <div id="api-status" class="text-xs text-gray-500 mt-2"></div>
+            </div>
             
             <div class="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center cursor-pointer hover:border-blue-500 hover:bg-blue-50 transition-colors" id="drop-zone">
-                <input type="file" id="file-input" class="hidden" accept="image/*">
+                <input type="file" id="file-input" class="hidden" accept="image/*,application/pdf">
                 <svg class="mx-auto h-12 w-12 text-gray-400" stroke="currentColor" fill="none" viewBox="0 0 48 48" aria-hidden="true">
                     <path d="M28 8H12a4 4 0 00-4 4v20m32-12v8m0 0v8a4 4 0 01-4 4H12a4 4 0 01-4-4v-4m32-4l-3.172-3.172a4 4 0 00-5.656 0L28 28M8 32l9.172-9.172a4 4 0 015.656 0L28 28m0 0l4 4m4-24h8m-4-4v8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
                 </svg>
                 <p class="mt-4 text-sm text-gray-600">
                     <span class="font-semibold text-blue-600">Click to upload</span> or drag and drop files here
                 </p>
-                <p class="text-xs text-gray-500 mt-1">Supports PNG, JPG, GIF, etc.</p>
+                <p class="text-xs text-gray-500 mt-1">Supports PDF, PNG, JPG, etc.</p>
             </div>
             <div id="file-name" class="text-center mt-4 text-sm text-gray-500"></div>
         </div>
@@ -56,7 +69,7 @@
         <div id="loading-section" class="hidden text-center py-12">
             <div class="loader ease-linear rounded-full border-8 border-t-8 border-gray-200 h-24 w-24 mx-auto"></div>
             <h2 class="text-xl font-semibold mt-6 text-gray-700">AI is working on the analysis…</h2>
-            <p class="text-gray-500 mt-2">This may take a moment—please wait.</p>
+            <p id="loading-message" class="text-gray-500 mt-2">This may take a moment—please wait.</p>
         </div>
 
         <div id="error-section" class="hidden text-center py-12">
@@ -75,15 +88,15 @@
             </div>
 
             <div class="perspective-1000">
-                <div id="card" class="card relative w-full h-96">
-                    <!-- Card Front -->
+                <div id="card" class="card relative w-full min-h-[24rem]">
+                    {/* Card Front */}
                     <div id="card-front" class="card-face absolute w-full h-full p-6 bg-white border border-gray-200 rounded-lg shadow-md flex flex-col">
                         <div class="flex-grow overflow-auto">
                             <p id="question-text" class="text-lg font-medium mb-4"></p>
                             <div id="options-container" class="space-y-3"></div>
                         </div>
                     </div>
-                    <!-- Card Back -->
+                    {/* Card Back */}
                     <div id="card-back" class="card-face card-face-back absolute w-full h-full p-6 bg-gray-50 border border-gray-200 rounded-lg shadow-md flex flex-col">
                         <div class="flex-grow overflow-auto">
                            <h3 class="text-lg font-semibold text-green-700 mb-2">Correct Answer</h3>
@@ -109,332 +122,783 @@
     </div>
 
     <script>
-        // --- DOM Elements ---
-        const uploadSection = document.getElementById('upload-section');
-        const loadingSection = document.getElementById('loading-section');
-        const errorSection = document.getElementById('error-section');
-        const quizSection = document.getElementById('quiz-section');
-        
-        const dropZone = document.getElementById('drop-zone');
-        const fileInput = document.getElementById('file-input');
-        const fileNameDisplay = document.getElementById('file-name');
-        
-        const errorMessage = document.getElementById('error-message');
-        const tryAgainButton = document.getElementById('try-again-button');
-        
-        const card = document.getElementById('card');
-        const questionText = document.getElementById('question-text');
-        const optionsContainer = document.getElementById('options-container');
-        const correctAnswer = document.getElementById('correct-answer');
-        const explanationText = document.getElementById('explanation-text');
-        const quizProgress = document.getElementById('quiz-progress');
-
-        const showAnswerButton = document.getElementById('show-answer-button');
-        const nextQuestionButton = document.getElementById('next-question-button');
-        const addToFavoritesButton = document.getElementById('add-to-favorites-button');
-        const restartButton = document.getElementById('restart-button');
-
-        // --- App State ---
-        let quizData = [];
-        let currentQuestionIndex = 0;
-        let lastUploadedFile = null;
-
-        // --- Event Listeners ---
-        dropZone.addEventListener('click', () => fileInput.click());
-        dropZone.addEventListener('dragover', (e) => {
-            e.preventDefault();
-            dropZone.classList.add('border-blue-500', 'bg-blue-50');
-        });
-        dropZone.addEventListener('dragleave', () => {
-            dropZone.classList.remove('border-blue-500', 'bg-blue-50');
-        });
-        dropZone.addEventListener('drop', (e) => {
-            e.preventDefault();
-            dropZone.classList.remove('border-blue-500', 'bg-blue-50');
-            const files = e.dataTransfer.files;
-            if (files.length > 0) {
-                handleFile(files[0]);
+        // 等待页面完全加载后再初始化
+        window.addEventListener('DOMContentLoaded', () => {
+            // 设置PDF.js worker路径
+            if (typeof pdfjsLib !== 'undefined') {
+                pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
             }
-        });
-        fileInput.addEventListener('change', (e) => {
-            if (e.target.files.length > 0) {
-                handleFile(e.target.files[0]);
-            }
-        });
 
-        showAnswerButton.addEventListener('click', flipCard);
-        nextQuestionButton.addEventListener('click', showNextQuestion);
-        restartButton.addEventListener('click', resetApp);
-        tryAgainButton.addEventListener('click', () => {
-            if(lastUploadedFile) handleFile(lastUploadedFile);
-        });
-        addToFavoritesButton.addEventListener('click', () => {
-            // Placeholder for future functionality
-            alert('Favorites feature is under development!');
-        });
-
-        // --- Core Functions ---
-
-        /**
-         * Handles the selected file, reads it as Base64, and initiates analysis.
-         * @param {File} file The image file selected by the user.
-         */
-        function handleFile(file) {
-            if (!file.type.startsWith('image/')) {
-                showError('Please upload a valid image file (PNG, JPG, etc.).');
-                return;
-            }
-            lastUploadedFile = file;
-            fileNameDisplay.textContent = `Selected file: ${file.name}`;
-
-            const reader = new FileReader();
-            reader.onload = (e) => {
-                const base64Data = e.target.result.split(',')[1];
-                analyzeImage(base64Data);
-            };
-            reader.onerror = () => {
-                showError('Failed to read the file. Please try again.');
-            };
-            reader.readAsDataURL(file);
-        }
-
-        /**
-         * Sends image data to the Gemini API for analysis.
-         * @param {string} base64ImageData The Base64 encoded image data.
-         */
-        async function analyzeImage(base64ImageData) {
-            showView('loading');
+            // --- DOM Elements ---
+            const uploadSection = document.getElementById('upload-section');
+            const loadingSection = document.getElementById('loading-section');
+            const errorSection = document.getElementById('error-section');
+            const quizSection = document.getElementById('quiz-section');
             
-            const apiKey = ""; 
-            const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=${apiKey}`;
-
-            const prompt = `You are an expert exam-question analyst. Analyze all questions in the provided image. For each question, do the following:
-            1) Extract the full question text (including the stem).
-            2) Extract all answer choices in order.
-            3) Identify which choice is correct.
-            4) Provide a clear, detailed explanation of why that choice is correct.
-
-            Return the results as a JSON array. Each array element must be an object with these keys:
-            - "questionText": string (complete question text)
-            - "options": array of strings (e.g. ["A. ...", "B. ..."])
-            - "correctAnswer": string (the correct option's text)
-            - "explanation": string (detailed reasoning)
-
-            Ensure the output is valid, parseable JSON with one object per question.
-            `;
-
-            const payload = {
-                contents: [
-                    {
-                        role: "user",
-                        parts: [
-                            { text: prompt },
-                            { inlineData: { mimeType: "image/png", data: base64ImageData } }
-                        ]
-                    }
-                ],
-                generationConfig: {
-                    responseMimeType: "application/json",
-                    responseSchema: {
-                        type: "ARRAY",
-                        items: {
-                            type: "OBJECT",
-                            properties: {
-                                "questionText": { "type": "STRING" },
-                                "options": {
-                                    "type": "ARRAY",
-                                    "items": { "type": "STRING" }
-                                },
-                                "correctAnswer": { "type": "STRING" },
-                                "explanation": { "type": "STRING" }
-                            },
-                            required: ["questionText", "options", "correctAnswer", "explanation"]
-                        }
-                    }
-                }
-            };
+            const dropZone = document.getElementById('drop-zone');
+            const fileInput = document.getElementById('file-input');
+            const fileNameDisplay = document.getElementById('file-name');
             
-            try {
-                const response = await fetchWithRetry(apiUrl, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(payload)
-                });
-
-                if (!response.ok) {
-                    throw new Error(`API request failed, status code: ${response.status}`);
-                }
-
-                const result = await response.json();
-                
-                if (result.candidates && result.candidates[0].content && result.candidates[0].content.parts[0]) {
-                    const parsedJson = JSON.parse(result.candidates[0].content.parts[0].text);
-                    if (parsedJson && parsedJson.length > 0) {
-                        startQuiz(parsedJson);
-                    } else {
-                        showError("AI was unable to extract any questions from the image. Please ensure the image is clear and contains questions in a standard format.");
-                    }
-                } else {
-                     showError("AI returned data in an unexpected format. Please try again later.");
-                }
-
-            } catch (error) {
-                console.error('Error during AI analysis:', error);
-                showError(`Analysis failed: ${error.message}. Please check your network connection or try again later.`);
-            }
-        }
-        
-        /**
-         * Fetch with exponential backoff retry mechanism.
-         * @param {string} url The URL to fetch.
-         * @param {object} options The fetch options.
-         * @param {number} retries Number of retries.
-         * @param {number} delay Initial delay in ms.
-         */
-        async function fetchWithRetry(url, options, retries = 3, delay = 1000) {
-            for (let i = 0; i < retries; i++) {
-                try {
-                    const response = await fetch(url, options);
-                    if (response.status !== 429 && response.status < 500) { // Don't retry on client errors (except 429)
-                        return response;
-                    }
-                    // Wait before retrying
-                    await new Promise(resolve => setTimeout(resolve, delay * Math.pow(2, i)));
-                } catch (error) {
-                    if (i === retries - 1) throw error;
-                    await new Promise(resolve => setTimeout(resolve, delay * Math.pow(2, i)));
-                }
-            }
-        }
-
-
-        /**
-         * Initializes the quiz state with data from the API.
-         * @param {Array} questions An array of question objects.
-         */
-        function startQuiz(questions) {
-            quizData = questions;
-            currentQuestionIndex = 0;
-            renderCurrentQuestion();
-            showView('quiz');
-        }
-
-        /**
-         * Renders the current question onto the card.
-         */
-        function renderCurrentQuestion() {
-            if (currentQuestionIndex >= quizData.length) {
-                showEndScreen();
-                return;
-            }
-
-            const question = quizData[currentQuestionIndex];
+            const errorMessage = document.getElementById('error-message');
+            const tryAgainButton = document.getElementById('try-again-button');
+            const loadingMessage = document.getElementById('loading-message');
             
-            // Reset card state
-            card.classList.remove('is-flipped');
-            showAnswerButton.classList.remove('hidden');
-            nextQuestionButton.classList.add('hidden');
+            const card = document.getElementById('card');
+            const questionText = document.getElementById('question-text');
+            const optionsContainer = document.getElementById('options-container');
+            const correctAnswer = document.getElementById('correct-answer');
+            const explanationText = document.getElementById('explanation-text');
+            const quizProgress = document.getElementById('quiz-progress');
 
-            // Populate front of the card
-            questionText.textContent = `Q: ${question.questionText}`;
-            optionsContainer.innerHTML = '';
-            question.options.forEach(option => {
-                const optionElement = document.createElement('div');
-                optionElement.className = 'p-3 border border-gray-200 rounded-lg';
-                optionElement.textContent = option;
-                optionsContainer.appendChild(optionElement);
+            const showAnswerButton = document.getElementById('show-answer-button');
+            const nextQuestionButton = document.getElementById('next-question-button');
+            const addToFavoritesButton = document.getElementById('add-to-favorites-button');
+            const restartButton = document.getElementById('restart-button');
+            const testApiButton = document.getElementById('test-api-button');
+            const apiStatus = document.getElementById('api-status');
+
+            // --- App State ---
+            let quizData = [];
+            let currentQuestionIndex = 0;
+            let lastUploadedFile = null;
+
+            // --- Event Listeners ---
+            dropZone.addEventListener('click', () => fileInput.click());
+            dropZone.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                dropZone.classList.add('border-blue-500', 'bg-blue-50');
+            });
+            dropZone.addEventListener('dragleave', () => {
+                dropZone.classList.remove('border-blue-500', 'bg-blue-50');
+            });
+            dropZone.addEventListener('drop', (e) => {
+                e.preventDefault();
+                dropZone.classList.remove('border-blue-500', 'bg-blue-50');
+                const files = e.dataTransfer.files;
+                if (files.length > 0) {
+                    handleFile(files[0]);
+                }
+            });
+            fileInput.addEventListener('change', (e) => {
+                if (e.target.files.length > 0) {
+                    handleFile(e.target.files[0]);
+                }
             });
 
-            // Populate back of the card
-            correctAnswer.textContent = question.correctAnswer;
-            explanationText.textContent = question.explanation;
+            showAnswerButton.addEventListener('click', () => {
+                revealCorrectAnswer();
+                flipCard();
+            });
+            nextQuestionButton.addEventListener('click', showNextQuestion);
+            restartButton.addEventListener('click', resetApp);
+            tryAgainButton.addEventListener('click', () => {
+                if(lastUploadedFile) handleFile(lastUploadedFile);
+            });
+            addToFavoritesButton.addEventListener('click', () => {
+                alert('Favorites feature is under development!');
+            });
+            testApiButton.addEventListener('click', testApiConnection);
 
-            // Update progress
-            quizProgress.textContent = `Question ${currentQuestionIndex + 1} / ${quizData.length}`;
-        }
-        
-        /**
-         * Shows a screen when all questions are completed.
-         */
-        function showEndScreen() {
-            quizSection.innerHTML = `
-                <div class="text-center py-12">
-                    <h2 class="text-2xl font-bold text-green-600 mb-4">Congrats! You've finished all quizzes!</h2>
-                    <p class="text-gray-600 mb-8">By reviewing what you have learned and acquiring new knowledge, you can become a master.</p>
-                    <button id="end-restart-button" class="px-8 py-3 bg-blue-600 text-white font-semibold rounded-lg hover:bg-blue-700 transition">Do it again</button>
-                </div>
-            `;
-            document.getElementById('end-restart-button').addEventListener('click', resetApp);
-        }
+            // --- Core Functions ---
+            
+            /**
+             * Handles file selection, routing to the correct processor.
+             * @param {File} file The file selected by the user.
+             */
+            function handleFile(file) {
+                console.log('Processing file:', file.name, 'Type:', file.type);
+                
+                const validImageTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+                const validPdfType = 'application/pdf';
 
-        /**
-         * Flips the card to show the answer.
-         */
-        function flipCard() {
-            card.classList.add('is-flipped');
-            showAnswerButton.classList.add('hidden');
-            nextQuestionButton.classList.remove('hidden');
-        }
+                const fileExtension = file.name.split('.').pop().toLowerCase();
+                const isImageByMime = validImageTypes.includes(file.type);
+                const isPdfByMime = file.type === validPdfType;
 
-        /**
-         * Moves to the next question in the quiz.
-         */
-        function showNextQuestion() {
-            currentQuestionIndex++;
-            renderCurrentQuestion();
-        }
+                const isImageByExt = ['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(fileExtension);
+                const isPdfByExt = fileExtension === 'pdf';
 
-        /**
-         * Resets the entire application to the initial upload state.
-         */
-        function resetApp() {
-            quizData = [];
-            currentQuestionIndex = 0;
-            lastUploadedFile = null;
-            fileInput.value = ''; // Clear file input
-            fileNameDisplay.textContent = '';
-            // Restore original quiz section if it was replaced by the end screen
-            if (!document.getElementById('card')) {
-                 location.reload(); // Simple way to restore state
+                console.log('File validation:', {
+                    isImageByMime,
+                    isPdfByMime,
+                    isImageByExt,
+                    isPdfByExt,
+                    fileType: file.type,
+                    fileExtension
+                });
+
+                if (!isImageByMime && !isPdfByMime && !isImageByExt && !isPdfByExt) {
+                    showError('Please upload a valid image (PNG, JPG, GIF, WebP) or PDF file.');
+                    return;
+                }
+
+                lastUploadedFile = file;
+                fileNameDisplay.textContent = `Selected file: ${file.name}`;
+
+                if (isPdfByMime || isPdfByExt) {
+                    handlePdfFile(file);
+                } else {
+                    handleImageFile(file);
+                }
             }
-            showView('upload');
-        }
-        
-        /**
-         * Controls which main section is visible.
-         * @param {'upload' | 'loading' | 'error' | 'quiz'} viewName The view to display.
-         */
-        function showView(viewName) {
-            uploadSection.classList.add('hidden');
-            loadingSection.classList.add('hidden');
-            errorSection.classList.add('hidden');
-            quizSection.classList.add('hidden');
 
-            switch(viewName) {
-                case 'upload':
-                    uploadSection.classList.remove('hidden');
-                    break;
-                case 'loading':
-                    loadingSection.classList.remove('hidden');
-                    break;
-                case 'error':
-                    errorSection.classList.remove('hidden');
-                    break;
-                case 'quiz':
-                    quizSection.classList.remove('hidden');
-                    break;
+            function handleImageFile(file) {
+                console.log('Processing image file:', file.name);
+                console.log('File size:', file.size, 'bytes');
+                console.log('File type:', file.type);
+                
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    console.log('FileReader onload triggered');
+                    const base64Data = e.target.result.split(',')[1];
+                    console.log('Base64 data length:', base64Data.length);
+                    console.log('Starting analyzeContent...');
+                    analyzeContent([{ mimeType: file.type, data: base64Data }]);
+                };
+                reader.onerror = () => {
+                    console.error('Error reading image file');
+                    showError('Failed to read the image file. Please try again.');
+                };
+                reader.readAsDataURL(file);
             }
-        }
-        
-        /**
-         * Displays an error message to the user.
-         * @param {string} message The error message to show.
-         */
-        function showError(message) {
-            errorMessage.textContent = message;
-            showView('error');
-        }
 
+            async function handlePdfFile(file) {
+                console.log('Processing PDF file:', file.name);
+                
+                // 检查PDF.js是否可用
+                if (typeof pdfjsLib === 'undefined') {
+                    showError('PDF processing library is not loaded. Please refresh the page and try again.');
+                    return;
+                }
+
+                showView('loading');
+                loadingMessage.textContent = 'Reading PDF file...';
+
+                try {
+                    const arrayBuffer = await file.arrayBuffer();
+                    const typedarray = new Uint8Array(arrayBuffer);
+                    
+                    console.log('PDF loaded, getting document...');
+                    const pdf = await pdfjsLib.getDocument(typedarray).promise;
+                    console.log('PDF document loaded, pages:', pdf.numPages);
+                    
+                    const imageParts = [];
+                    loadingMessage.textContent = `Converting ${pdf.numPages} PDF page(s) to images...`;
+
+                    for (let i = 1; i <= pdf.numPages; i++) {
+                        try {
+                            console.log(`Processing page ${i}/${pdf.numPages}`);
+                            const page = await pdf.getPage(i);
+                            const viewport = page.getViewport({ scale: 1.5 });
+                            
+                            const canvas = document.createElement('canvas');
+                            const context = canvas.getContext('2d');
+                            canvas.height = viewport.height;
+                            canvas.width = viewport.width;
+
+                            const renderContext = {
+                                canvasContext: context,
+                                viewport: viewport
+                            };
+
+                            await page.render(renderContext).promise;
+                            
+                            const base64Data = canvas.toDataURL('image/jpeg', 0.8).split(',')[1];
+                            imageParts.push({ mimeType: 'image/jpeg', data: base64Data });
+                            
+                            console.log(`Page ${i} converted successfully`);
+                        } catch (pageError) {
+                            console.error(`Error processing page ${i}:`, pageError);
+                            // 继续处理其他页面
+                        }
+                    }
+                    
+                    if (imageParts.length > 0) {
+                        console.log(`Successfully converted ${imageParts.length} pages`);
+                        analyzeContent(imageParts);
+                    } else {
+                        showError('Could not extract any pages from the PDF. Please ensure the PDF is not corrupted.');
+                    }
+
+                } catch (error) {
+                    console.error('Error processing PDF:', error);
+                    showError(`Failed to process the PDF: ${error.message}. Please ensure the file is a valid PDF.`);
+                }
+            }
+
+            async function analyzeContent(parts) {
+                console.log('=== analyzeContent started ===');
+                console.log('Number of parts:', parts.length);
+                parts.forEach((part, index) => {
+                    console.log(`Part ${index}:`, {
+                        mimeType: part.mimeType,
+                        dataLength: part.data.length,
+                        dataPreview: part.data.substring(0, 100) + '...'
+                    });
+                });
+                
+                showView('loading');
+                loadingMessage.textContent = 'AI is analyzing the content... This may take a moment.';
+                
+                const apiKey = "AIzaSyD83AJjydBFFJaR92DorQ08NZNOpfJNSaU";
+                const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=${apiKey}`;
+
+                const prompt = `You are an expert exam-question analyst. Analyze all questions in the provided images (which could be pages from a document). For each distinct question you find, do the following:
+                1) Extract the full question text (including the stem).
+                2) Extract all answer choices in order.
+                3) Identify which choice is correct. The text for the correct answer must be an exact match to one of the options provided.
+                4) Provide a clear, detailed explanation of why that choice is correct.
+
+                CRITICAL: You must respond with ONLY raw JSON. Do NOT include any Markdown formatting, code blocks, or other text.
+                Do NOT use \`\`\`json or \`\`\` markers.
+                Do NOT include any explanations outside the JSON.
+                
+                The response must be a raw JSON array where each element is an object with these exact keys:
+                - "questionText": string (complete question text)
+                - "options": array of strings (e.g. ["A. ...", "B. ..."])
+                - "correctAnswer": string (the correct option's text)
+                - "explanation": string (detailed reasoning)
+
+                Example format (return ONLY this, no other text):
+                [
+                    {
+                        "questionText": "What is the capital of France?",
+                        "options": ["A. London", "B. Paris", "C. Berlin", "D. Madrid"],
+                        "correctAnswer": "B. Paris",
+                        "explanation": "Paris is the capital and largest city of France."
+                    }
+                ]
+
+                Remember: Return ONLY the raw JSON array, nothing else.`;
+
+                try {
+                    console.log('Starting image compression...');
+                    // 检查图片数据大小，如果太大则压缩
+                    const compressedParts = await compressImageParts(parts);
+                    console.log('Image compression completed. Compressed parts:', compressedParts.length);
+                    
+                    // 构建正确的API请求格式
+                    const payload = {
+                        contents: [{
+                            parts: [
+                                { text: prompt },
+                                ...compressedParts.map(part => ({
+                                    inlineData: {
+                                        mimeType: part.mimeType,
+                                        data: part.data
+                                    }
+                                }))
+                            ]
+                        }],
+                        generationConfig: {
+                            temperature: 0.1,
+                            topK: 40,
+                            topP: 0.95,
+                            maxOutputTokens: 8192,
+                        }
+                    };
+
+                    console.log('Payload built successfully');
+                    console.log('Sending API request with payload:', {
+                        numParts: payload.contents[0].parts.length,
+                        promptLength: prompt.length,
+                        totalDataSize: compressedParts.reduce((sum, part) => sum + part.data.length, 0)
+                    });
+
+                    // 先测试API连接
+                    console.log('Testing API connection...');
+                    const testResponse = await fetch(apiUrl, {
+                        method: 'POST',
+                        headers: { 
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            contents: [{
+                                parts: [{ text: "Hello, this is a test." }]
+                            }]
+                        })
+                    });
+
+                    if (!testResponse.ok) {
+                        const testErrorText = await testResponse.text();
+                        console.error('API Test Failed:', testErrorText);
+                        throw new Error(`API test failed: ${testResponse.status} - ${testErrorText}`);
+                    }
+
+                    console.log('API test successful, proceeding with analysis...');
+
+                    console.log('Sending main API request...');
+                    const response = await fetch(apiUrl, {
+                        method: 'POST',
+                        headers: { 
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify(payload)
+                    });
+
+                    console.log('API response received, status:', response.status);
+
+                    if (!response.ok) {
+                        const errorText = await response.text();
+                        console.error('API Error Response:', errorText);
+                        throw new Error(`API request failed, status code: ${response.status}. ${errorText}`);
+                    }
+
+                    console.log('Parsing API response...');
+                    const result = await response.json();
+                    console.log('API Response:', result);
+                    console.log('API Response Type:', typeof result);
+                    console.log('API Response Keys:', Object.keys(result));
+                    
+                    // 检查API响应的实际结构
+                    if (result.error) {
+                        console.error('API Error:', result.error);
+                        throw new Error(`API Error: ${result.error.message || 'Unknown error'}`);
+                    }
+                    
+                    // 尝试不同的响应格式
+                    let responseText = null;
+                    
+                    // 详细记录响应结构
+                    console.log('=== Detailed Response Structure ===');
+                    if (result.candidates) {
+                        console.log('Candidates found:', result.candidates.length);
+                        if (result.candidates[0]) {
+                            console.log('First candidate keys:', Object.keys(result.candidates[0]));
+                            if (result.candidates[0].content) {
+                                console.log('Content keys:', Object.keys(result.candidates[0].content));
+                                if (result.candidates[0].content.parts) {
+                                    console.log('Parts array length:', result.candidates[0].content.parts.length);
+                                    result.candidates[0].content.parts.forEach((part, index) => {
+                                        console.log(`Part ${index}:`, part);
+                                        console.log(`Part ${index} keys:`, Object.keys(part));
+                                    });
+                                }
+                            }
+                        }
+                    }
+                    console.log('=== End Response Structure ===');
+                    
+                    if (result.candidates && result.candidates[0] && result.candidates[0].content && result.candidates[0].content.parts && result.candidates[0].content.parts[0]) {
+                        responseText = result.candidates[0].content.parts[0].text;
+                        console.log('Found response in candidates[0].content.parts[0].text');
+                    } else if (result.candidates && result.candidates[0] && result.candidates[0].content && result.candidates[0].content.parts) {
+                        // 尝试找到包含文本的部分
+                        const textPart = result.candidates[0].content.parts.find(part => part.text);
+                        if (textPart) {
+                            responseText = textPart.text;
+                            console.log('Found response in candidates[0].content.parts with text');
+                        }
+                    } else if (result.promptFeedback) {
+                        // 检查是否有提示反馈
+                        console.log('Prompt feedback:', result.promptFeedback);
+                        throw new Error('API returned prompt feedback instead of content. This might indicate an issue with the request format.');
+                    }
+                    
+                    // 尝试其他可能的响应格式
+                    if (!responseText) {
+                        // 检查是否有直接的文本响应
+                        if (result.text) {
+                            responseText = result.text;
+                            console.log('Found response in result.text');
+                        } else if (result.content && result.content.text) {
+                            responseText = result.content.text;
+                            console.log('Found response in result.content.text');
+                        } else if (result.response && result.response.text) {
+                            responseText = result.response.text;
+                            console.log('Found response in result.response.text');
+                        }
+                    }
+                    
+                    if (!responseText) {
+                        console.error('Could not find response text in API result:', result);
+                        console.log('Available keys in result:', Object.keys(result));
+                        if (result.candidates && result.candidates[0]) {
+                            console.log('Available keys in candidates[0]:', Object.keys(result.candidates[0]));
+                            if (result.candidates[0].content) {
+                                console.log('Available keys in content:', Object.keys(result.candidates[0].content));
+                                if (result.candidates[0].content.parts) {
+                                    console.log('Parts structure:', result.candidates[0].content.parts);
+                                }
+                            }
+                        }
+                        throw new Error('Could not extract response text from API result');
+                    }
+                    
+                    console.log('AI Response Text:', responseText);
+                    
+                    try {
+                        // 清理响应文本，移除Markdown代码块格式
+                        let cleanedResponseText = responseText.trim();
+                        
+                        // 移除开头的 ```json 或 ``` 标记
+                        if (cleanedResponseText.startsWith('```json')) {
+                            cleanedResponseText = cleanedResponseText.substring(7);
+                        } else if (cleanedResponseText.startsWith('```')) {
+                            cleanedResponseText = cleanedResponseText.substring(3);
+                        }
+                        
+                        // 移除结尾的 ``` 标记
+                        if (cleanedResponseText.endsWith('```')) {
+                            cleanedResponseText = cleanedResponseText.substring(0, cleanedResponseText.length - 3);
+                        }
+                        
+                        // 清理转义字符
+                        cleanedResponseText = cleanedResponseText.replace(/\\"/g, '"');
+                        cleanedResponseText = cleanedResponseText.replace(/\\n/g, '\n');
+                        cleanedResponseText = cleanedResponseText.replace(/\\t/g, '\t');
+                        
+                        console.log('Cleaned response text:', cleanedResponseText);
+                        
+                        const parsedJson = JSON.parse(cleanedResponseText);
+                        if (parsedJson && Array.isArray(parsedJson) && parsedJson.length > 0) {
+                            console.log('JSON parsed successfully, starting quiz...');
+                            startQuiz(parsedJson);
+                        } else {
+                            showError("AI was unable to extract any questions. Please ensure the file is clear and contains questions in a standard format.");
+                        }
+                    } catch (parseError) {
+                        console.error('JSON Parse Error:', parseError);
+                        console.log('Raw response text:', responseText);
+                        
+                        // 尝试更激进的清理
+                        try {
+                            let aggressiveClean = responseText;
+                            
+                            // 查找第一个 [ 和最后一个 ]
+                            const startBracket = aggressiveClean.indexOf('[');
+                            const endBracket = aggressiveClean.lastIndexOf(']');
+                            
+                            if (startBracket !== -1 && endBracket !== -1 && endBracket > startBracket) {
+                                aggressiveClean = aggressiveClean.substring(startBracket, endBracket + 1);
+                                console.log('Aggressively cleaned text:', aggressiveClean);
+                                
+                                const aggressiveJson = JSON.parse(aggressiveClean);
+                                if (aggressiveJson && Array.isArray(aggressiveJson) && aggressiveJson.length > 0) {
+                                    console.log('Aggressive cleaning successful, starting quiz...');
+                                    startQuiz(aggressiveJson);
+                                    return;
+                                }
+                            }
+                        } catch (e) {
+                            console.log('Aggressive cleaning also failed:', e);
+                        }
+                        
+                        showError("AI returned data in an unexpected format. Please try again later.");
+                    }
+
+                } catch (error) {
+                    console.error('Error during AI analysis:', error);
+                    if (error.message.includes('400')) {
+                        showError(`API request failed: ${error.message}. This might be due to file size or format issues. Please try with a smaller file or different format.`);
+                    } else {
+                        showError(`Analysis failed: ${error.message}. Please check your network connection or try again later.`);
+                    }
+                }
+            }
+
+            // 新增：压缩图片数据以符合API限制
+            async function compressImageParts(parts) {
+                console.log('=== compressImageParts started ===');
+                const maxDataSize = 4 * 1024 * 1024; // 4MB限制
+                const compressedParts = [];
+                
+                for (let i = 0; i < parts.length; i++) {
+                    const part = parts[i];
+                    console.log(`Processing part ${i}:`, {
+                        mimeType: part.mimeType,
+                        originalSize: part.data.length,
+                        needsCompression: part.data.length > maxDataSize
+                    });
+                    
+                    let compressedData = part.data;
+                    
+                    // 如果数据太大，尝试压缩
+                    if (part.data.length > maxDataSize) {
+                        try {
+                            console.log(`Compressing part ${i}...`);
+                            compressedData = await compressImageData(part.data, part.mimeType);
+                            console.log(`Part ${i} compressed:`, {
+                                originalSize: part.data.length,
+                                compressedSize: compressedData.length,
+                                compressionRatio: (compressedData.length / part.data.length * 100).toFixed(2) + '%'
+                            });
+                        } catch (error) {
+                            console.warn(`Failed to compress part ${i}, using original:`, error);
+                        }
+                    }
+                    
+                    compressedParts.push({
+                        mimeType: part.mimeType,
+                        data: compressedData
+                    });
+                }
+                
+                console.log('=== compressImageParts completed ===');
+                return compressedParts;
+            }
+
+            // 新增：压缩图片数据
+            async function compressImageData(base64Data, mimeType) {
+                console.log('=== compressImageData started ===');
+                return new Promise((resolve, reject) => {
+                    const img = new Image();
+                    img.onload = () => {
+                        console.log('Image loaded for compression:', {
+                            originalWidth: img.width,
+                            originalHeight: img.height
+                        });
+                        
+                        const canvas = document.createElement('canvas');
+                        const ctx = canvas.getContext('2d');
+                        
+                        // 计算新的尺寸，保持宽高比
+                        let { width, height } = img;
+                        const maxDimension = 1024;
+                        
+                        if (width > height && width > maxDimension) {
+                            height = (height * maxDimension) / width;
+                            width = maxDimension;
+                        } else if (height > maxDimension) {
+                            width = (width * maxDimension) / height;
+                            height = maxDimension;
+                        }
+                        
+                        console.log('Compressed dimensions:', { width, height });
+                        
+                        canvas.width = width;
+                        canvas.height = height;
+                        
+                        ctx.drawImage(img, 0, 0, width, height);
+                        
+                        // 使用较低的质量压缩
+                        const compressedDataUrl = canvas.toDataURL(mimeType, 0.6);
+                        const compressedBase64 = compressedDataUrl.split(',')[1];
+                        
+                        console.log('Image compression completed');
+                        resolve(compressedBase64);
+                    };
+                    
+                    img.onerror = (error) => {
+                        console.error('Image compression failed:', error);
+                        reject(error);
+                    };
+                    
+                    img.src = `data:${mimeType};base64,${base64Data}`;
+                });
+            }
+            
+
+
+            function startQuiz(questions) {
+                quizData = questions;
+                currentQuestionIndex = 0;
+                renderCurrentQuestion();
+                showView('quiz');
+            }
+
+            function renderCurrentQuestion() {
+                if (currentQuestionIndex >= quizData.length) {
+                    showEndScreen();
+                    return;
+                }
+
+                const question = quizData[currentQuestionIndex];
+                
+                card.classList.remove('is-flipped');
+                showAnswerButton.classList.remove('hidden');
+                nextQuestionButton.classList.add('hidden');
+
+                questionText.textContent = `Q: ${question.questionText}`;
+                optionsContainer.innerHTML = '';
+                
+                question.options.forEach(optionText => {
+                    const optionElement = document.createElement('div');
+                    optionElement.className = 'p-3 border border-gray-300 rounded-lg transition-colors duration-200 cursor-pointer hover:bg-blue-50 hover:border-blue-400';
+                    optionElement.textContent = optionText;
+                    optionElement.dataset.optionText = optionText;
+                    optionElement.addEventListener('click', handleOptionClick);
+                    optionsContainer.appendChild(optionElement);
+                });
+
+                correctAnswer.textContent = question.correctAnswer;
+                explanationText.textContent = question.explanation;
+
+                quizProgress.textContent = `Question ${currentQuestionIndex + 1} / ${quizData.length}`;
+            }
+            
+            function handleOptionClick(event) {
+                const clickedOption = event.currentTarget;
+                const question = quizData[currentQuestionIndex];
+                const selectedAnswer = clickedOption.dataset.optionText;
+                const correctAnswerText = question.correctAnswer;
+
+                const isCorrect = selectedAnswer.trim() === correctAnswerText.trim();
+
+                const allOptions = optionsContainer.querySelectorAll('div');
+                allOptions.forEach(opt => {
+                    opt.classList.add('no-pointer-events'); 
+                    opt.classList.remove('hover:bg-blue-50', 'hover:border-blue-400'); 
+                });
+
+                if (isCorrect) {
+                    clickedOption.classList.remove('border-gray-300');
+                    clickedOption.classList.add('bg-green-100', 'border-green-500', 'border-2');
+                } else {
+                    clickedOption.classList.remove('border-gray-300');
+                    clickedOption.classList.add('bg-red-100', 'border-red-500', 'border-2');
+                    revealCorrectAnswer();
+                }
+
+                flipCard();
+            }
+
+            function revealCorrectAnswer() {
+                const correctAnswerText = quizData[currentQuestionIndex].correctAnswer;
+                const allOptions = optionsContainer.querySelectorAll('div');
+                
+                allOptions.forEach(opt => {
+                    opt.classList.add('no-pointer-events');
+                    opt.classList.remove('hover:bg-blue-50', 'hover:border-blue-400');
+
+                    if (opt.dataset.optionText.trim() === correctAnswerText.trim()) {
+                        opt.classList.remove('border-gray-300');
+                        opt.classList.add('bg-green-100', 'border-green-500', 'border-2');
+                    }
+                });
+            }
+
+            function showEndScreen() {
+                quizSection.innerHTML = `
+                    <div class="text-center py-12">
+                        <h2 class="text-2xl font-bold text-green-600 mb-4">Congrats! You've finished all quizzes!</h2>
+                        <p class="text-gray-600 mb-8">By reviewing what you have learned and acquiring new knowledge, you can become a master.</p>
+                        <button id="end-restart-button" class="px-8 py-3 bg-blue-600 text-white font-semibold rounded-lg hover:bg-blue-700 transition">Do it again</button>
+                    </div>
+                `;
+                document.getElementById('end-restart-button').addEventListener('click', resetApp);
+            }
+
+            function flipCard() {
+                card.classList.add('is-flipped');
+                showAnswerButton.classList.add('hidden');
+                nextQuestionButton.classList.remove('hidden');
+            }
+
+            function showNextQuestion() {
+                currentQuestionIndex++;
+                renderCurrentQuestion();
+            }
+
+            function resetApp() {
+                quizData = [];
+                currentQuestionIndex = 0;
+                lastUploadedFile = null;
+                fileInput.value = '';
+                fileNameDisplay.textContent = '';
+                if (!document.getElementById('card')) {
+                     location.reload();
+                }
+                showView('upload');
+            }
+            
+            function showView(viewName) {
+                uploadSection.classList.add('hidden');
+                loadingSection.classList.add('hidden');
+                errorSection.classList.add('hidden');
+                quizSection.classList.add('hidden');
+
+                switch(viewName) {
+                    case 'upload':
+                        uploadSection.classList.remove('hidden');
+                        break;
+                    case 'loading':
+                        loadingSection.classList.remove('hidden');
+                        break;
+                    case 'error':
+                        errorSection.classList.remove('hidden');
+                        break;
+                    case 'quiz':
+                        quizSection.classList.remove('hidden');
+                        break;
+                }
+            }
+            
+            function showError(message) {
+                errorMessage.textContent = message;
+                showView('error');
+            }
+
+            async function testApiConnection() {
+                apiStatus.textContent = 'Testing API connection...';
+                try {
+                    const apiKey = "AIzaSyD83AJjydBFFJaR92DorQ08NZNOpfJNSaU";
+                    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=${apiKey}`;
+
+                    const prompt = "Hello, Gemini! Please respond with just 'Hello back!'";
+                    const payload = {
+                        contents: [{
+                            parts: [{ text: prompt }]
+                        }],
+                        generationConfig: {
+                            temperature: 0.1,
+                            topK: 40,
+                            topP: 0.95,
+                            maxOutputTokens: 8192,
+                        }
+                    };
+
+                    console.log('Testing API with payload:', payload);
+
+                    const response = await fetch(apiUrl, {
+                        method: 'POST',
+                        headers: { 
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify(payload)
+                    });
+
+                    if (response.ok) {
+                        const result = await response.json();
+                        console.log('Test API Response:', result);
+                        console.log('Test Response Structure:', {
+                            type: typeof result,
+                            keys: Object.keys(result),
+                            hasCandidates: !!result.candidates,
+                            candidatesLength: result.candidates ? result.candidates.length : 0
+                        });
+                        
+                        if (result.candidates && result.candidates[0]) {
+                            console.log('First candidate:', result.candidates[0]);
+                            if (result.candidates[0].content) {
+                                console.log('Content:', result.candidates[0].content);
+                                if (result.candidates[0].content.parts) {
+                                    console.log('Parts:', result.candidates[0].content.parts);
+                                }
+                            }
+                        }
+                        
+                        apiStatus.textContent = 'API Connection Successful! Check console for details.';
+                        apiStatus.classList.remove('text-red-400', 'text-green-400');
+                        apiStatus.classList.add('text-green-400');
+                        alert('API connection successful! Check browser console for response details.');
+                    } else {
+                        const errorText = await response.text();
+                        console.error('Test API Error:', errorText);
+                        apiStatus.textContent = `API Connection Failed: ${response.status} - ${errorText}`;
+                        apiStatus.classList.remove('text-green-400', 'text-red-400');
+                        apiStatus.classList.add('text-red-400');
+                        alert(`API connection failed. Status: ${response.status}. Message: ${errorText}`);
+                    }
+                } catch (error) {
+                    console.error('Test API Error:', error);
+                    apiStatus.textContent = `API Connection Error: ${error.message}`;
+                    apiStatus.classList.remove('text-green-400', 'text-red-400');
+                    apiStatus.classList.add('text-red-400');
+                    alert(`API connection error: ${error.message}`);
+                }
+            }
+        });
     </script>
 </body>
 </html>
