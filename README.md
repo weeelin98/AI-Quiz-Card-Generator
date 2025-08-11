@@ -1,10 +1,10 @@
-AI Quiz Card Generator
+# AI Quiz Card Generator
 This is a simple HTML project that can run locally in your browser.
 
-Project Description
+## Project Description
 The goal of this project is to create an app/webpage where users can upload a PDF or image containing exam questions. The program reads the file, analyzes each question to identify the correct answer, and generates detailed explanations based on a preset AI prompt. The user interface presents questions one by one, similar to Anki flashcards, making it easy to study.
 
-Features
+## Features
 Supports PDF and Multi-Image Upload: You can upload a single PDF document or select multiple image files at once.
 
 AI-Powered Analysis: Extracts questions, answers, and explanations using the Gemini AI.
@@ -15,7 +15,7 @@ Instant Feedback: Click on an option to see if you are correct, or flip the card
 
 Favorites Feature: A feature to add questions to a "favorites" list is planned for future development.
 
-Configuration
+## Configuration
 To use the AI analysis feature, you need to obtain your own free Gemini API key from Google AI Studio and insert it into the project.
 
 How to get your Gemini API Key:
@@ -39,7 +39,7 @@ const apiKey = "";
 
 Paste your API key between the quotes.
 
-Issues to be Solved
+## Issues to be Solved
 UI Optimization: The user interface can be further improved for a better user experience.
 
 Recognition Accuracy: The precision of PDF recognition, especially for questions involving charts and diagrams, needs improvement. A feature to display the relevant chart/image alongside the question text is also needed.
